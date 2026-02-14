@@ -102,16 +102,12 @@ export function ProjectionChart({
     });
   }, [curveLabels]);
 
-  // Explicit legend payload to enforce correct order (Recharts sorts alphabetically otherwise)
-  const legendPayload = useMemo(() =>
-    curveLabels.map((label, i) => ({
-      value: label,
-      type: 'line' as const,
-      id: label,
-      color: hiddenCurves.has(i) ? 'rgba(139, 157, 195, 0.3)' : CURVE_COLORS[i],
-    })),
-    [curveLabels, hiddenCurves]
-  );
+  // Sort legend items to match our curveLabels order (Recharts sorts alphabetically otherwise)
+  const legendSorter = useCallback((a: { value?: string }, b: { value?: string }) => {
+    const idxA = curveLabels.indexOf(a.value || '');
+    const idxB = curveLabels.indexOf(b.value || '');
+    return idxA - idxB;
+  }, [curveLabels]);
 
   if (chartData.length === 0) return null;
 
@@ -155,7 +151,7 @@ export function ProjectionChart({
           verticalAlign="bottom"
           wrapperStyle={LEGEND_WRAPPER_STYLE}
           onClick={handleLegendClick}
-          payload={legendPayload}
+          itemSorter={legendSorter}
         />
         <ReferenceLine
           y={0}
