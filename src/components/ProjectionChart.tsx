@@ -16,7 +16,7 @@ const CURVE_COLORS = ['#00D1FF', '#FF6B35', '#22C55E', '#A78BFA'];
 
 interface ProjectionChartProps {
   curves: ProjectionPoint[][]; // 4 curves: now, 1/3, 2/3, expiry
-  curveLabels: string[]; // e.g. ["Now (168h)", "1/3 to expiry (112h)", ...]
+  curveLabels: string[];
   currentCryptoPrice: number;
   cryptoSymbol: string;
 }
@@ -26,7 +26,7 @@ interface ChartDataRow {
   [key: string]: number;
 }
 
-const CHART_MARGIN = { top: 20, right: 30, bottom: 20, left: 20 };
+const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 20 };
 const GRID_STYLE = { strokeDasharray: '3 3', stroke: 'rgba(139, 157, 195, 0.1)' };
 const TOOLTIP_STYLE = {
   backgroundColor: 'rgba(19, 26, 42, 0.95)',
@@ -36,6 +36,52 @@ const TOOLTIP_STYLE = {
 const LEGEND_WRAPPER_STYLE = { paddingTop: 20, cursor: 'pointer' };
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
+
+function getTickIntervals(range: number): { major: number; minor: number } {
+  if (range > 100000) return { major: 10000, minor: 1000 };
+  if (range > 50000) return { major: 5000, minor: 1000 };
+  if (range > 10000) return { major: 2000, minor: 500 };
+  if (range > 5000) return { major: 1000, minor: 100 };
+  if (range > 1000) return { major: 500, minor: 100 };
+  return { major: 100, minor: 10 };
+}
+
+/** Custom X-axis tick that renders major ticks with labels and minor ticks as small marks */
+function CustomXTick(props: {
+  x: number;
+  y: number;
+  payload: { value: number };
+  majorInterval: number;
+  minorInterval: number;
+}) {
+  const { x, y, payload, majorInterval } = props;
+  const value = payload.value;
+  const isMajor = value % majorInterval === 0;
+
+  if (isMajor) {
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <line y1={0} y2={8} stroke="#8B9DC3" strokeWidth={1} />
+        <text
+          y={22}
+          textAnchor="middle"
+          fill="#8B9DC3"
+          fontSize={11}
+          fontFamily="JetBrains Mono, monospace"
+        >
+          ${value.toLocaleString()}
+        </text>
+      </g>
+    );
+  }
+
+  // Minor tick — small mark only
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <line y1={0} y2={4} stroke="rgba(139, 157, 195, 0.3)" strokeWidth={1} />
+    </g>
+  );
+}
 
 export function ProjectionChart({
   curves,
@@ -59,7 +105,6 @@ export function ProjectionChart({
     });
   }, [curves, curveLabels]);
 
-  // Compute Y domain from visible curves
   const yDomain = useMemo(() => {
     let min = 0;
     let max = 0;
@@ -74,40 +119,21 @@ export function ProjectionChart({
     return [min - pad, max + pad];
   }, [curves, hiddenCurves]);
 
-  // Generate major ticks (every 1000) and minor ticks (every 100)
-  const { majorTicks, minorTicks } = useMemo(() => {
-    if (chartData.length === 0) return { majorTicks: [], minorTicks: [] };
+  // Generate all tick positions (both major and minor)
+  const { allTicks, majorInterval, minorInterval, xDomain } = useMemo(() => {
+    if (chartData.length === 0) return { allTicks: [], majorInterval: 1000, minorInterval: 100, xDomain: [0, 1] };
     const min = chartData[0].cryptoPrice;
     const max = chartData[chartData.length - 1].cryptoPrice;
     const range = max - min;
+    const { major, minor } = getTickIntervals(range);
 
-    // Determine tick intervals based on range
-    let majorInterval: number;
-    let minorInterval: number;
-    if (range > 100000) { majorInterval = 10000; minorInterval = 1000; }
-    else if (range > 50000) { majorInterval = 5000; minorInterval = 1000; }
-    else if (range > 10000) { majorInterval = 1000; minorInterval = 100; }
-    else if (range > 5000) { majorInterval = 500; minorInterval = 100; }
-    else if (range > 1000) { majorInterval = 100; minorInterval = 10; }
-    else { majorInterval = 50; minorInterval = 10; }
-
-    const majors: number[] = [];
-    const minors: number[] = [];
-    const start = Math.ceil(min / minorInterval) * minorInterval;
-    for (let v = start; v <= max; v += minorInterval) {
-      if (v % majorInterval === 0) {
-        majors.push(v);
-      } else {
-        minors.push(v);
-      }
+    const ticks: number[] = [];
+    const start = Math.ceil(min / minor) * minor;
+    for (let v = start; v <= max; v += minor) {
+      ticks.push(v);
     }
-    return { majorTicks: majors, minorTicks: minors };
+    return { allTicks: ticks, majorInterval: major, minorInterval: minor, xDomain: [min, max] };
   }, [chartData]);
-
-  const formatXAxis = useCallback(
-    (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
-    []
-  );
 
   const formatYAxis = useCallback((v: number) => v.toFixed(2), []);
 
@@ -132,11 +158,19 @@ export function ProjectionChart({
     });
   }, [curveLabels]);
 
-  // Sort legend items to match our curveLabels order (Recharts sorts alphabetically otherwise)
   const legendSorter = useCallback((item: { value?: string }) => {
     const idx = curveLabels.indexOf(item.value || '');
     return idx >= 0 ? idx : 999;
   }, [curveLabels]);
+
+  // Memoize the custom tick renderer with intervals baked in
+  const renderTick = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (props: any) => (
+      <CustomXTick {...props} majorInterval={majorInterval} minorInterval={minorInterval} />
+    ),
+    [majorInterval, minorInterval]
+  );
 
   if (chartData.length === 0) return null;
 
@@ -144,31 +178,19 @@ export function ProjectionChart({
     <ResponsiveContainer width="100%" minHeight={600}>
       <LineChart data={chartData} margin={CHART_MARGIN}>
         <CartesianGrid {...GRID_STYLE} />
-        {/* Minor ticks — small marks, no labels */}
         <XAxis
-          xAxisId="minor"
           dataKey="cryptoPrice"
-          ticks={minorTicks}
-          tickFormatter={() => ''}
-          tickSize={4}
-          stroke="rgba(139, 157, 195, 0.3)"
-          tickLine={{ stroke: 'rgba(139, 157, 195, 0.3)' }}
-          axisLine={false}
-        />
-        {/* Major ticks — labeled */}
-        <XAxis
-          xAxisId="major"
-          dataKey="cryptoPrice"
-          ticks={majorTicks}
-          tickFormatter={formatXAxis}
+          type="number"
+          domain={xDomain}
+          ticks={allTicks}
+          tick={renderTick}
           stroke="#8B9DC3"
-          fontSize={12}
-          tickMargin={10}
-          tickSize={8}
+          tickLine={false}
+          interval={0}
           label={{
             value: `${cryptoSymbol} Price`,
             position: 'insideBottom',
-            offset: -10,
+            offset: -30,
             style: { fill: '#8B9DC3' },
           }}
         />
@@ -203,7 +225,6 @@ export function ProjectionChart({
           strokeDasharray="3 3"
         />
         <ReferenceLine
-          xAxisId="major"
           x={currentCryptoPrice}
           {...REFERENCE_LINE_STYLE}
           label={{
@@ -217,7 +238,6 @@ export function ProjectionChart({
         {curveLabels.map((label, i) => (
           <Line
             key={label}
-            xAxisId="major"
             type="monotone"
             dataKey={label}
             name={label}
