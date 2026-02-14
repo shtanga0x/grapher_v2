@@ -137,7 +137,7 @@ function CustomTooltipContent({
         const color = i === 0 ? NOW_COLOR : (pnl >= 0 ? GREEN : RED);
         return (
           <div key={label} style={{ color, fontSize: 13, padding: '2px 0' }}>
-            {label}: {cost.toFixed(4)} / {pnlSign}{pnl.toFixed(4)} ({formatPct(pnlPct)})
+            {label}: {cost.toFixed(2)} / {pnlSign}{pnl.toFixed(2)} ({formatPct(pnlPct)})
           </div>
         );
       })}
