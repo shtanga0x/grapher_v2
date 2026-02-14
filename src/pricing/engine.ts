@@ -1,5 +1,29 @@
 import type { OptionType, SelectedStrike, ProjectionPoint } from '../types';
 
+export interface SmilePoint {
+  moneyness: number; // ln(S_calibration / K)
+  iv: number;
+}
+
+/**
+ * Linear interpolation on the IV smile, flat extrapolation at edges.
+ * Smile must be sorted by moneyness ascending.
+ */
+export function interpolateSmile(smile: SmilePoint[], moneyness: number): number {
+  if (smile.length === 0) return 0.5;
+  if (smile.length === 1) return smile[0].iv;
+  if (moneyness <= smile[0].moneyness) return smile[0].iv;
+  if (moneyness >= smile[smile.length - 1].moneyness) return smile[smile.length - 1].iv;
+
+  for (let i = 0; i < smile.length - 1; i++) {
+    if (moneyness <= smile[i + 1].moneyness) {
+      const t = (moneyness - smile[i].moneyness) / (smile[i + 1].moneyness - smile[i].moneyness);
+      return smile[i].iv + t * (smile[i + 1].iv - smile[i].iv);
+    }
+  }
+  return smile[smile.length - 1].iv;
+}
+
 /**
  * Normal CDF using rational approximation (Abramowitz & Stegun 26.2.17)
  */
@@ -29,12 +53,12 @@ export function normalCDF(x: number): number {
 /**
  * European binary ("above") YES price: P(S, K, σ, τ) = Φ(d₂)
  */
-export function priceAbove(S: number, K: number, sigma: number, tau: number): number {
+export function priceAbove(S: number, K: number, sigma: number, tau: number, H: number = 0.5): number {
   if (tau <= 0) return S >= K ? 1 : 0;
   if (sigma <= 0) return S >= K ? 1 : 0;
 
-  const sqrtTau = Math.sqrt(tau);
-  const d2 = (Math.log(S / K) - (sigma * sigma * tau) / 2) / (sigma * sqrtTau);
+  const tauH = Math.pow(tau, H);
+  const d2 = (Math.log(S / K) - (sigma * sigma * Math.pow(tau, 2 * H)) / 2) / (sigma * tauH);
   return normalCDF(d2);
 }
 
@@ -55,35 +79,35 @@ export function priceAbove(S: number, K: number, sigma: number, tau: number): nu
  *     e₁ = (ln(H/S) + σ²τ/2) / (σ√τ)
  *     e₂ = (ln(H/S) − σ²τ/2) / (σ√τ)
  */
-export function priceHit(S: number, H: number, sigma: number, tau: number, isUpBarrier: boolean): number {
-  if (S === H) return 1;
+export function priceHit(S: number, barrier: number, sigma: number, tau: number, isUpBarrier: boolean, H: number = 0.5): number {
+  if (S === barrier) return 1;
 
   if (isUpBarrier) {
-    // UP barrier: need price to rise to H
-    if (S >= H) return 1;
+    // UP barrier: need price to rise to barrier
+    if (S >= barrier) return 1;
     if (tau <= 0 || sigma <= 0) return 0;
 
-    const sqrtTau = Math.sqrt(tau);
-    const logSH = Math.log(S / H); // negative since S < H
-    const halfSigmaSqTau = (sigma * sigma * tau) / 2;
+    const tauH = Math.pow(tau, H);
+    const logSH = Math.log(S / barrier); // negative since S < barrier
+    const halfSigmaSqTau2H = (sigma * sigma * Math.pow(tau, 2 * H)) / 2;
 
-    const d1 = (logSH - halfSigmaSqTau) / (sigma * sqrtTau);
-    const d2 = (logSH + halfSigmaSqTau) / (sigma * sqrtTau);
+    const d1 = (logSH - halfSigmaSqTau2H) / (sigma * tauH);
+    const d2 = (logSH + halfSigmaSqTau2H) / (sigma * tauH);
 
-    return Math.min(1, Math.max(0, normalCDF(d1) + (S / H) * normalCDF(d2)));
+    return Math.min(1, Math.max(0, normalCDF(d1) + (S / barrier) * normalCDF(d2)));
   } else {
-    // DOWN barrier: need price to drop to H
-    if (S <= H) return 1;
+    // DOWN barrier: need price to drop to barrier
+    if (S <= barrier) return 1;
     if (tau <= 0 || sigma <= 0) return 0;
 
-    const sqrtTau = Math.sqrt(tau);
-    const logHS = Math.log(H / S); // negative since H < S
-    const halfSigmaSqTau = (sigma * sigma * tau) / 2;
+    const tauH = Math.pow(tau, H);
+    const logHS = Math.log(barrier / S); // negative since barrier < S
+    const halfSigmaSqTau2H = (sigma * sigma * Math.pow(tau, 2 * H)) / 2;
 
-    const e1 = (logHS + halfSigmaSqTau) / (sigma * sqrtTau);
-    const e2 = (logHS - halfSigmaSqTau) / (sigma * sqrtTau);
+    const e1 = (logHS + halfSigmaSqTau2H) / (sigma * tauH);
+    const e2 = (logHS - halfSigmaSqTau2H) / (sigma * tauH);
 
-    return Math.min(1, Math.max(0, normalCDF(e1) + (S / H) * normalCDF(e2)));
+    return Math.min(1, Math.max(0, normalCDF(e1) + (S / barrier) * normalCDF(e2)));
   }
 }
 
@@ -92,9 +116,9 @@ export function priceHit(S: number, H: number, sigma: number, tau: number, isUpB
  * For 'hit' type, isUpBarrier determines barrier direction.
  */
 export function priceOptionYes(
-  S: number, K: number, sigma: number, tau: number, optionType: OptionType, isUpBarrier: boolean = true
+  S: number, K: number, sigma: number, tau: number, optionType: OptionType, isUpBarrier: boolean = true, H: number = 0.5
 ): number {
-  return optionType === 'above' ? priceAbove(S, K, sigma, tau) : priceHit(S, K, sigma, tau, isUpBarrier);
+  return optionType === 'above' ? priceAbove(S, K, sigma, tau, H) : priceHit(S, K, sigma, tau, isUpBarrier, H);
 }
 
 /**
@@ -109,6 +133,7 @@ export function solveImpliedVol(
   yesPrice: number,
   optionType: OptionType,
   isUpBarrier: boolean = true,
+  H: number = 0.5,
   tolerance: number = 1e-6,
   maxIter: number = 100
 ): number | null {
@@ -119,7 +144,7 @@ export function solveImpliedVol(
   let a = 0.01;
   let b = 10.0;
 
-  const f = (sigma: number) => priceOptionYes(S, K, sigma, tau, optionType, isUpBarrier) - yesPrice;
+  const f = (sigma: number) => priceOptionYes(S, K, sigma, tau, optionType, isUpBarrier, H) - yesPrice;
 
   let fa = f(a);
   let fb = f(b);
@@ -201,6 +226,8 @@ export function computePnlCurve(
   upperPrice: number,
   tau: number,
   optionType: OptionType,
+  H: number = 0.5,
+  smile?: SmilePoint[],
   numPoints: number = 200
 ): ProjectionPoint[] {
   if (strikes.length === 0 || numPoints < 2) return [];
@@ -214,7 +241,10 @@ export function computePnlCurve(
     let projectedValue = 0;
 
     for (const strike of strikes) {
-      const yesPrice = priceOptionYes(cryptoPrice, strike.strikePrice, strike.impliedVol, tau, optionType, strike.isUpBarrier);
+      const iv = smile
+        ? interpolateSmile(smile, Math.log(cryptoPrice / strike.strikePrice))
+        : strike.impliedVol;
+      const yesPrice = priceOptionYes(cryptoPrice, strike.strikePrice, iv, tau, optionType, strike.isUpBarrier, H);
       projectedValue += strike.side === 'YES' ? yesPrice : (1 - yesPrice);
     }
 

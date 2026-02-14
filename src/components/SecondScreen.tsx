@@ -13,7 +13,7 @@ import {
 import { ArrowBack } from '@mui/icons-material';
 import type { CryptoOption, OptionType, ParsedMarket, PolymarketEvent, SelectedStrike, ProjectionPoint, Side } from '../types';
 import { fetchCurrentPrice } from '../api/binance';
-import { solveImpliedVol, computePnlCurve, computeExpiryPnl } from '../pricing/engine';
+import { solveImpliedVol, computePnlCurve, computeExpiryPnl, type SmilePoint } from '../pricing/engine';
 import { ProjectionChart } from './ProjectionChart';
 
 interface SecondScreenProps {
@@ -74,6 +74,7 @@ export function SecondScreen({
   const [error, setError] = useState<string | null>(null);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]);
   const [sliderBounds, setSliderBounds] = useState<[number, number]>([0, 0]);
+  const [hExponent, setHExponent] = useState(0.5);
 
   const expirationTs = event.endDate;
   const nowTs = Math.floor(Date.now() / 1000);
@@ -119,6 +120,10 @@ export function SecondScreen({
     setPriceRange(value as [number, number]);
   }, []);
 
+  const handleHChange = useCallback((_: unknown, value: number | number[]) => {
+    setHExponent(value as number);
+  }, []);
+
   // Calibrate IV and build selected strikes
   const selectedStrikes: SelectedStrike[] = useMemo(() => {
     if (!spotPrice || tauNow <= 0) return [];
@@ -130,7 +135,7 @@ export function SecondScreen({
       if (!market || market.strikePrice <= 0) continue;
 
       const isUpBarrier = market.strikePrice > spotPrice;
-      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier);
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hExponent);
       const side: Side = sideStr;
       const entryPrice = side === 'YES' ? market.currentPrice : (1 - market.currentPrice);
 
@@ -146,7 +151,23 @@ export function SecondScreen({
       });
     }
     return result;
-  }, [markets, selections, spotPrice, tauNow, optionType]);
+  }, [markets, selections, spotPrice, tauNow, optionType, hExponent]);
+
+  // Build IV smile from ALL market strikes (not just selected)
+  const ivSmile: SmilePoint[] = useMemo(() => {
+    if (!spotPrice || tauNow <= 0) return [];
+
+    const points: SmilePoint[] = [];
+    for (const market of markets) {
+      if (market.strikePrice <= 0 || market.currentPrice <= 0.001 || market.currentPrice >= 0.999) continue;
+      const isUpBarrier = market.strikePrice > spotPrice;
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hExponent);
+      if (iv !== null) {
+        points.push({ moneyness: Math.log(spotPrice / market.strikePrice), iv });
+      }
+    }
+    return points.sort((a, b) => a.moneyness - b.moneyness);
+  }, [markets, spotPrice, tauNow, optionType, hExponent]);
 
   // Curve labels with hours
   const curveLabels = useMemo(() => {
@@ -171,12 +192,12 @@ export function SecondScreen({
     const tau3 = tauNow * (1 / 3);
 
     return [
-      computePnlCurve(selectedStrikes, lower, upper, tau1, optionType),
-      computePnlCurve(selectedStrikes, lower, upper, tau2, optionType),
-      computePnlCurve(selectedStrikes, lower, upper, tau3, optionType),
+      computePnlCurve(selectedStrikes, lower, upper, tau1, optionType, hExponent, ivSmile),
+      computePnlCurve(selectedStrikes, lower, upper, tau2, optionType, hExponent, ivSmile),
+      computePnlCurve(selectedStrikes, lower, upper, tau3, optionType, hExponent, ivSmile),
       computeExpiryPnl(selectedStrikes, lower, upper, optionType),
     ];
-  }, [selectedStrikes, priceRange, tauNow, optionType]);
+  }, [selectedStrikes, priceRange, tauNow, optionType, hExponent, ivSmile]);
 
   const expiryDate = new Date(expirationTs * 1000);
   const hasSelections = selections.size > 0;
@@ -377,6 +398,48 @@ export function SecondScreen({
                   '&:hover': { boxShadow: '0 0 8px rgba(0, 209, 255, 0.4)' },
                 },
                 '& .MuiSlider-track': { bgcolor: '#00D1FF' },
+                '& .MuiSlider-rail': { bgcolor: 'rgba(139, 157, 195, 0.2)' },
+              }}
+            />
+          </Box>
+        )}
+
+        {/* Time Exponent (H) Slider */}
+        {!loadingSpot && (
+          <Box
+            sx={{
+              mt: 2,
+              pt: 2,
+              px: 3,
+              borderTop: '1px solid rgba(139, 157, 195, 0.1)',
+            }}
+          >
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                0.40
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                Time Exponent H = {hExponent.toFixed(2)}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                0.80
+              </Typography>
+            </Box>
+            <Slider
+              value={hExponent}
+              onChange={handleHChange}
+              min={0.4}
+              max={0.8}
+              step={0.01}
+              valueLabelDisplay="auto"
+              valueLabelFormat={(v) => v.toFixed(2)}
+              sx={{
+                color: '#A78BFA',
+                '& .MuiSlider-thumb': {
+                  bgcolor: '#A78BFA',
+                  '&:hover': { boxShadow: '0 0 8px rgba(167, 139, 250, 0.4)' },
+                },
+                '& .MuiSlider-track': { bgcolor: '#A78BFA' },
                 '& .MuiSlider-rail': { bgcolor: 'rgba(139, 157, 195, 0.2)' },
               }}
             />

@@ -11,7 +11,7 @@ import {
 } from 'recharts';
 import type { ProjectionPoint } from '../types';
 
-const NOW_COLOR = '#FF6B35';
+const NOW_COLOR = '#FFB020';
 const GREEN = '#22C55E';
 const RED = '#EF4444';
 
@@ -285,6 +285,7 @@ export function ProjectionChart({
             yAxisId="left"
             orientation="left"
             domain={yDomain}
+            tickCount={7}
             tickFormatter={formatYAxisCost}
             stroke="#8B9DC3"
             fontSize={13}
@@ -299,6 +300,7 @@ export function ProjectionChart({
             yAxisId="right"
             orientation="right"
             domain={yDomain}
+            tickCount={7}
             tickFormatter={formatYAxisPnl}
             stroke="#8B9DC3"
             fontSize={13}
@@ -311,13 +313,13 @@ export function ProjectionChart({
           />
           <Tooltip content={renderTooltip} />
           <ReferenceLine
-            yAxisId="left"
+            yAxisId="right"
             y={0}
             stroke="rgba(139, 157, 195, 0.6)"
             strokeDasharray="3 3"
             label={{
               value: '0',
-              position: 'left',
+              position: 'right',
               fill: '#8B9DC3',
               fontSize: 15,
               fontWeight: 'bold',
