@@ -178,7 +178,6 @@ export function SecondScreen({
 
   const expiryDate = new Date(expirationTs * 1000);
   const hasSelections = selections.size > 0;
-  const validRange = priceRange[0] > 0 && priceRange[1] > priceRange[0];
 
   // Slider step: scale based on range
   const sliderStep = useMemo(() => {

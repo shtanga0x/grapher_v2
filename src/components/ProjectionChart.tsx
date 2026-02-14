@@ -91,7 +91,8 @@ export function ProjectionChart({
     [cryptoSymbol]
   );
 
-  const handleLegendClick = useCallback((entry: { value: string }) => {
+  const handleLegendClick = useCallback((entry: { value?: string }) => {
+    if (!entry.value) return;
     const idx = curveLabels.indexOf(entry.value);
     if (idx === -1) return;
     setHiddenCurves((prev) => {
