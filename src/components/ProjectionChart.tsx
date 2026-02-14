@@ -65,7 +65,7 @@ function CustomXTick(props: {
           y={22}
           textAnchor="middle"
           fill="#8B9DC3"
-          fontSize={11}
+          fontSize={12}
           fontFamily="JetBrains Mono, monospace"
         >
           ${value.toLocaleString()}
@@ -113,7 +113,7 @@ function CustomTooltipContent({
 
   return (
     <div style={TOOLTIP_STYLE}>
-      <div style={{ color: '#8B9DC3', marginBottom: 6, fontSize: 13 }}>
+      <div style={{ color: '#8B9DC3', marginBottom: 6, fontSize: 14 }}>
         {cryptoSymbol}: ${cryptoPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
       </div>
       {curveLabels.map((label, i) => {
@@ -121,7 +121,7 @@ function CustomTooltipContent({
         const val = valueMap.get(label);
         if (val == null) return null;
         return (
-          <div key={label} style={{ color: CURVE_COLORS[i], fontSize: 12, padding: '2px 0' }}>
+          <div key={label} style={{ color: CURVE_COLORS[i], fontSize: 13, padding: '2px 0' }}>
             {label}: {val.toFixed(4)}
           </div>
         );
@@ -236,19 +236,26 @@ export function ProjectionChart({
             domain={yDomain}
             tickFormatter={formatYAxis}
             stroke="#8B9DC3"
-            fontSize={12}
+            fontSize={13}
             label={{
               value: 'P&L',
               angle: -90,
               position: 'insideLeft',
-              style: { fill: '#8B9DC3' },
+              style: { fill: '#8B9DC3', fontSize: 14 },
             }}
           />
           <Tooltip content={renderTooltip} />
           <ReferenceLine
             y={0}
-            stroke="rgba(139, 157, 195, 0.4)"
+            stroke="rgba(139, 157, 195, 0.6)"
             strokeDasharray="3 3"
+            label={{
+              value: '0',
+              position: 'left',
+              fill: '#8B9DC3',
+              fontSize: 15,
+              fontWeight: 'bold',
+            }}
           />
           <ReferenceLine
             x={currentCryptoPrice}
@@ -257,7 +264,7 @@ export function ProjectionChart({
               value: `Spot: $${currentCryptoPrice.toLocaleString()}`,
               position: 'top',
               fill: '#8B9DC3',
-              fontSize: 12,
+              fontSize: 13,
             }}
           />
 
@@ -302,7 +309,7 @@ export function ProjectionChart({
                 borderRadius: 2,
               }}
             />
-            <span style={{ color: '#8B9DC3', fontSize: 13 }}>{label}</span>
+            <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
           </div>
         ))}
       </div>

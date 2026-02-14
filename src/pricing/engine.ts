@@ -40,20 +40,26 @@ export function priceAbove(S: number, K: number, sigma: number, tau: number): nu
 
 /**
  * One-touch barrier ("hit") YES price.
+ * Probability that GBM starting at S touches barrier H before time τ (r=0).
+ * When S ≥ H the barrier is already breached → price = 1.
+ * Otherwise uses the reflection-principle formula for an UP barrier:
+ *   P = Φ(d₁) + (S/H)·Φ(d₂)
+ *   d₁ = (ln(S/H) − σ²τ/2) / (σ√τ)
+ *   d₂ = (ln(S/H) + σ²τ/2) / (σ√τ)
  */
 export function priceHit(S: number, H: number, sigma: number, tau: number): number {
-  if (S === H) return 1;
-  if (tau <= 0) return S >= H ? 1 : 0;
+  if (S >= H) return 1;
+  if (tau <= 0) return 0;
   if (sigma <= 0) return 0;
 
   const sqrtTau = Math.sqrt(tau);
-  const logHS = Math.log(H / S);
+  const logSH = Math.log(S / H); // negative since S < H
   const halfSigmaSqTau = (sigma * sigma * tau) / 2;
 
-  const e1 = (logHS - halfSigmaSqTau) / (sigma * sqrtTau);
-  const e2 = (logHS + halfSigmaSqTau) / (sigma * sqrtTau);
+  const d1 = (logSH - halfSigmaSqTau) / (sigma * sqrtTau);
+  const d2 = (logSH + halfSigmaSqTau) / (sigma * sqrtTau);
 
-  const price = normalCDF(e1) + (S / H) * normalCDF(e2);
+  const price = normalCDF(d1) + (S / H) * normalCDF(d2);
   return Math.min(1, Math.max(0, price));
 }
 
