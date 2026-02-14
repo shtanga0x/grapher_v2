@@ -201,7 +201,7 @@ export function ProjectionChart({
     return data;
   }, [curves, curveLabels]);
 
-  const yDomain = useMemo(() => {
+  const { yDomain, yTicks } = useMemo(() => {
     let min = 0;
     let max = 0;
     for (let c = 0; c < curves.length; c++) {
@@ -212,7 +212,21 @@ export function ProjectionChart({
       }
     }
     const pad = Math.max(0.1, (max - min) * 0.1);
-    return [min - pad, max + pad];
+    const domain: [number, number] = [min - pad, max + pad];
+
+    // Generate ~7 evenly spaced ticks, always including 0
+    const range = domain[1] - domain[0];
+    const rawStep = range / 6;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const nice = [1, 2, 2.5, 5, 10].find((n) => n * magnitude >= rawStep) ?? 10;
+    const step = nice * magnitude;
+
+    const ticks: number[] = [0];
+    for (let v = step; v <= domain[1]; v += step) ticks.push(Math.round(v * 1000) / 1000);
+    for (let v = -step; v >= domain[0]; v -= step) ticks.push(Math.round(v * 1000) / 1000);
+    ticks.sort((a, b) => a - b);
+
+    return { yDomain: domain, yTicks: ticks };
   }, [curves, hiddenCurves]);
 
   const { allTicks, majorInterval, minorInterval, xDomain } = useMemo(() => {
@@ -285,7 +299,7 @@ export function ProjectionChart({
             yAxisId="left"
             orientation="left"
             domain={yDomain}
-            tickCount={7}
+            ticks={yTicks}
             tickFormatter={formatYAxisCost}
             stroke="#8B9DC3"
             fontSize={13}
@@ -300,7 +314,7 @@ export function ProjectionChart({
             yAxisId="right"
             orientation="right"
             domain={yDomain}
-            tickCount={7}
+            ticks={yTicks}
             tickFormatter={formatYAxisPnl}
             stroke="#8B9DC3"
             fontSize={13}
@@ -313,17 +327,10 @@ export function ProjectionChart({
           />
           <Tooltip content={renderTooltip} />
           <ReferenceLine
-            yAxisId="right"
+            yAxisId="left"
             y={0}
             stroke="rgba(139, 157, 195, 0.6)"
             strokeDasharray="3 3"
-            label={{
-              value: '0',
-              position: 'right',
-              fill: '#8B9DC3',
-              fontSize: 15,
-              fontWeight: 'bold',
-            }}
           />
           <ReferenceLine
             yAxisId="left"
@@ -337,18 +344,7 @@ export function ProjectionChart({
             }}
           />
 
-          {/* Invisible line to force right Y-axis tick rendering */}
-          <Line
-            yAxisId="right"
-            type="monotone"
-            dataKey={curveLabels[0]}
-            stroke="none"
-            dot={false}
-            activeDot={false}
-            legendType="none"
-          />
-
-          {/* Now line: orange, dashed */}
+          {/* Now line: yellowish-orange, dashed */}
           <Line
             yAxisId="left"
             type="monotone"
