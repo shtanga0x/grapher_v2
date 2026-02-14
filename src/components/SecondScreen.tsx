@@ -404,48 +404,48 @@ export function SecondScreen({
           </Box>
         )}
 
-        {/* Time Exponent (H) Slider */}
-        {!loadingSpot && (
-          <Box
-            sx={{
-              mt: 2,
-              pt: 2,
-              px: 3,
-              borderTop: '1px solid rgba(139, 157, 195, 0.1)',
-            }}
-          >
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-              <Typography variant="body2" color="text.secondary">
-                0.40
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-                Time Exponent H = {hExponent.toFixed(2)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                0.80
-              </Typography>
-            </Box>
-            <Slider
-              value={hExponent}
-              onChange={handleHChange}
-              min={0.4}
-              max={0.8}
-              step={0.01}
-              valueLabelDisplay="auto"
-              valueLabelFormat={(v) => v.toFixed(2)}
-              sx={{
-                color: '#A78BFA',
-                '& .MuiSlider-thumb': {
-                  bgcolor: '#A78BFA',
-                  '&:hover': { boxShadow: '0 0 8px rgba(167, 139, 250, 0.4)' },
-                },
-                '& .MuiSlider-track': { bgcolor: '#A78BFA' },
-                '& .MuiSlider-rail': { bgcolor: 'rgba(139, 157, 195, 0.2)' },
-              }}
-            />
-          </Box>
-        )}
       </Paper>
+
+      {/* Time Exponent (H) Slider */}
+      {!loadingSpot && (
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            border: '1px solid rgba(139, 157, 195, 0.15)',
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              0.40
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+              Time Exponent H = {hExponent.toFixed(2)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              0.80
+            </Typography>
+          </Box>
+          <Slider
+            value={hExponent}
+            onChange={handleHChange}
+            min={0.4}
+            max={0.8}
+            step={0.01}
+            valueLabelDisplay="auto"
+            valueLabelFormat={(v) => v.toFixed(2)}
+            sx={{
+              color: '#A78BFA',
+              '& .MuiSlider-thumb': {
+                bgcolor: '#A78BFA',
+                '&:hover': { boxShadow: '0 0 8px rgba(167, 139, 250, 0.4)' },
+              },
+              '& .MuiSlider-track': { bgcolor: '#A78BFA' },
+              '& .MuiSlider-rail': { bgcolor: 'rgba(139, 157, 195, 0.2)' },
+            }}
+          />
+        </Paper>
+      )}
 
       {/* Strike Selection — Single Column Polymarket Style */}
       <Paper
