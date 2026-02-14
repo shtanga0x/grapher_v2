@@ -49,15 +49,11 @@ export type CryptoOption = 'BTC' | 'ETH' | 'SOL' | 'XRP';
 
 export type OptionType = 'above' | 'hit';
 
+export type Side = 'YES' | 'NO';
+
 export interface ProjectionPoint {
   cryptoPrice: number;
-  constructionCost: number;
-}
-
-export interface ProjectionCurve {
-  label: string;
-  data: ProjectionPoint[];
-  color: string;
+  pnl: number;
 }
 
 export interface SelectedStrike {
@@ -65,6 +61,7 @@ export interface SelectedStrike {
   question: string;
   groupItemTitle: string;
   strikePrice: number;
-  currentPrice: number; // YES price
-  impliedVol: number; // Calibrated IV
+  side: Side;
+  entryPrice: number; // Price paid (YES price for YES, 1-YES price for NO)
+  impliedVol: number; // Calibrated IV (same for YES/NO)
 }

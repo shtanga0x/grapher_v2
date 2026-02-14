@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   LineChart,
   Line,
@@ -13,12 +13,11 @@ import {
 import type { ProjectionPoint } from '../types';
 
 const CURVE_COLORS = ['#00D1FF', '#FF6B35', '#22C55E', '#A78BFA'];
-const CURVE_LABELS = ['Now', '1/3 to expiry', '2/3 to expiry', 'At expiry'];
 
 interface ProjectionChartProps {
   curves: ProjectionPoint[][]; // 4 curves: now, 1/3, 2/3, expiry
+  curveLabels: string[]; // e.g. ["Now (168h)", "1/3 to expiry (112h)", ...]
   currentCryptoPrice: number;
-  numStrikes: number;
   cryptoSymbol: string;
 }
 
@@ -34,32 +33,46 @@ const TOOLTIP_STYLE = {
   border: '1px solid rgba(139, 157, 195, 0.3)',
   borderRadius: 8,
 };
-const LEGEND_WRAPPER_STYLE = { paddingTop: 20 };
+const LEGEND_WRAPPER_STYLE = { paddingTop: 20, cursor: 'pointer' };
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
 export function ProjectionChart({
   curves,
+  curveLabels,
   currentCryptoPrice,
-  numStrikes,
   cryptoSymbol,
 }: ProjectionChartProps) {
-  // Build unified chart data: each row has cryptoPrice + one key per curve
+  const [hiddenCurves, setHiddenCurves] = useState<Set<number>>(new Set());
+
   const chartData = useMemo(() => {
     if (curves.length === 0 || curves[0].length === 0) return [];
 
-    const data: ChartDataRow[] = curves[0].map((point, i) => {
+    return curves[0].map((point, i) => {
       const row: ChartDataRow = { cryptoPrice: point.cryptoPrice };
       for (let c = 0; c < curves.length; c++) {
         if (curves[c][i]) {
-          row[CURVE_LABELS[c]] = curves[c][i].constructionCost;
+          row[curveLabels[c]] = curves[c][i].pnl;
         }
       }
       return row;
     });
+  }, [curves, curveLabels]);
 
-    return data;
-  }, [curves]);
+  // Compute Y domain from visible curves
+  const yDomain = useMemo(() => {
+    let min = 0;
+    let max = 0;
+    for (let c = 0; c < curves.length; c++) {
+      if (hiddenCurves.has(c)) continue;
+      for (const pt of curves[c]) {
+        if (pt.pnl < min) min = pt.pnl;
+        if (pt.pnl > max) max = pt.pnl;
+      }
+    }
+    const pad = Math.max(0.1, (max - min) * 0.1);
+    return [min - pad, max + pad];
+  }, [curves, hiddenCurves]);
 
   const formatXAxis = useCallback(
     (v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
@@ -74,9 +87,19 @@ export function ProjectionChart({
   );
 
   const tooltipLabelFormatter = useCallback(
-    (label: number) => `${cryptoSymbol} Price: $${label.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+    (label: number) => `${cryptoSymbol}: $${label.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
     [cryptoSymbol]
   );
+
+  const handleLegendClick = useCallback((entry: { value: string }) => {
+    const idx = curveLabels.indexOf(entry.value);
+    if (idx === -1) return;
+    setHiddenCurves((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  }, [curveLabels]);
 
   if (chartData.length === 0) return null;
 
@@ -98,12 +121,12 @@ export function ProjectionChart({
           }}
         />
         <YAxis
-          domain={[0, numStrikes]}
+          domain={yDomain}
           tickFormatter={formatYAxis}
           stroke="#8B9DC3"
           fontSize={12}
           label={{
-            value: 'Construction Cost',
+            value: 'P&L',
             angle: -90,
             position: 'insideLeft',
             style: { fill: '#8B9DC3' },
@@ -119,19 +142,25 @@ export function ProjectionChart({
           align="center"
           verticalAlign="bottom"
           wrapperStyle={LEGEND_WRAPPER_STYLE}
+          onClick={handleLegendClick}
+        />
+        <ReferenceLine
+          y={0}
+          stroke="rgba(139, 157, 195, 0.4)"
+          strokeDasharray="3 3"
         />
         <ReferenceLine
           x={currentCryptoPrice}
           {...REFERENCE_LINE_STYLE}
           label={{
-            value: `Current: $${currentCryptoPrice.toLocaleString()}`,
+            value: `Spot: $${currentCryptoPrice.toLocaleString()}`,
             position: 'top',
             fill: '#8B9DC3',
             fontSize: 12,
           }}
         />
 
-        {CURVE_LABELS.map((label, i) => (
+        {curveLabels.map((label, i) => (
           <Line
             key={label}
             type="monotone"
@@ -143,6 +172,8 @@ export function ProjectionChart({
             dot={false}
             activeDot={ACTIVE_DOT}
             connectNulls
+            hide={hiddenCurves.has(i)}
+            strokeOpacity={hiddenCurves.has(i) ? 0.2 : 1}
           />
         ))}
       </LineChart>

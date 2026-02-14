@@ -27,17 +27,11 @@ export function normalCDF(x: number): number {
 }
 
 /**
- * European binary ("above") option price.
- * P(S, K, σ, τ) = Φ(d₂)
- * where d₂ = [ln(S/K) - σ²τ/2] / (σ√τ)
+ * European binary ("above") YES price: P(S, K, σ, τ) = Φ(d₂)
  */
 export function priceAbove(S: number, K: number, sigma: number, tau: number): number {
-  if (tau <= 0) {
-    return S >= K ? 1 : 0;
-  }
-  if (sigma <= 0) {
-    return S >= K ? 1 : 0;
-  }
+  if (tau <= 0) return S >= K ? 1 : 0;
+  if (sigma <= 0) return S >= K ? 1 : 0;
 
   const sqrtTau = Math.sqrt(tau);
   const d2 = (Math.log(S / K) - (sigma * sigma * tau) / 2) / (sigma * sqrtTau);
@@ -45,31 +39,13 @@ export function priceAbove(S: number, K: number, sigma: number, tau: number): nu
 }
 
 /**
- * One-touch barrier ("hit") option price.
- * Works for both up barriers (H > S) and down barriers (H < S).
- * With r=0:
- *   P(S, H, σ, τ) = Φ(d₁) + (H/S) · Φ(d₂)
- * where:
- *   d₁ = [ln(S/H) + σ²τ/2] / (σ√τ)
- *   d₂ = [ln(S/H) - σ²τ/2] / (σ√τ)
- *
- * Note: the formula for one-touch with r=0 simplifies to:
- *   P = Φ(-|ln(S/H)|/(σ√τ) + σ√τ/2) + Φ(-|ln(S/H)|/(σ√τ) - σ√τ/2)
- * But we use the general form which handles both directions.
+ * One-touch barrier ("hit") YES price.
  */
 export function priceHit(S: number, H: number, sigma: number, tau: number): number {
   if (S === H) return 1;
+  if (tau <= 0) return S >= H ? 1 : 0;
+  if (sigma <= 0) return 0;
 
-  if (tau <= 0) {
-    return S >= H ? 1 : 0;
-  }
-  if (sigma <= 0) {
-    return 0;
-  }
-
-  // Standard one-touch barrier option (pays $1 at expiry if barrier touched)
-  // With drift μ = r - σ²/2, and r=0: μ = -σ²/2
-  // P = N((ln(H/S) - σ²τ/2)/(σ√τ)) + (S/H) · N((ln(H/S) + σ²τ/2)/(σ√τ))
   const sqrtTau = Math.sqrt(tau);
   const logHS = Math.log(H / S);
   const halfSigmaSqTau = (sigma * sigma * tau) / 2;
@@ -82,53 +58,40 @@ export function priceHit(S: number, H: number, sigma: number, tau: number): numb
 }
 
 /**
- * Price a single option based on type
+ * Price the YES side of an option
  */
-export function priceOption(
-  S: number,
-  K: number,
-  sigma: number,
-  tau: number,
-  optionType: OptionType
+export function priceOptionYes(
+  S: number, K: number, sigma: number, tau: number, optionType: OptionType
 ): number {
-  if (optionType === 'above') {
-    return priceAbove(S, K, sigma, tau);
-  } else {
-    return priceHit(S, K, sigma, tau);
-  }
+  return optionType === 'above' ? priceAbove(S, K, sigma, tau) : priceHit(S, K, sigma, tau);
 }
 
 /**
  * Implied volatility solver using Brent's method.
- * Finds σ such that priceOption(S, K, σ, τ, type) = targetPrice
+ * Always calibrates from the YES price (IV is the same for YES and NO).
  */
 export function solveImpliedVol(
   S: number,
   K: number,
   tau: number,
-  targetPrice: number,
+  yesPrice: number,
   optionType: OptionType,
   tolerance: number = 1e-6,
   maxIter: number = 100
 ): number | null {
-  // Edge cases
-  if (targetPrice <= 0.001) return 0.01; // Near zero price → very low vol
-  if (targetPrice >= 0.999) return 10.0; // Near 1 price → very high vol
-  if (tau <= 0) return null; // Can't calibrate with no time
+  if (yesPrice <= 0.001) return 0.01;
+  if (yesPrice >= 0.999) return 10.0;
+  if (tau <= 0) return null;
 
-  let a = 0.01; // 1% annual vol
-  let b = 10.0; // 1000% annual vol
+  let a = 0.01;
+  let b = 10.0;
 
-  const f = (sigma: number) => priceOption(S, K, sigma, tau, optionType) - targetPrice;
+  const f = (sigma: number) => priceOptionYes(S, K, sigma, tau, optionType) - yesPrice;
 
   let fa = f(a);
   let fb = f(b);
 
-  // Check if root is bracketed
   if (fa * fb > 0) {
-    // Try to find a bracket
-    // For very deep ITM/OTM, the function may be monotonic and not cross zero
-    // Return the vol that gets closest
     let bestSigma = a;
     let bestError = Math.abs(fa);
     for (let sigma = 0.05; sigma <= 10.0; sigma += 0.05) {
@@ -141,7 +104,6 @@ export function solveImpliedVol(
     return bestSigma;
   }
 
-  // Brent's method
   let c = a;
   let fc = fa;
   let d = b - a;
@@ -149,27 +111,16 @@ export function solveImpliedVol(
 
   for (let i = 0; i < maxIter; i++) {
     if (fb * fc > 0) {
-      c = a;
-      fc = fa;
-      d = b - a;
-      e = d;
+      c = a; fc = fa; d = b - a; e = d;
     }
-
     if (Math.abs(fc) < Math.abs(fb)) {
-      a = b;
-      b = c;
-      c = a;
-      fa = fb;
-      fb = fc;
-      fc = fa;
+      a = b; b = c; c = a; fa = fb; fb = fc; fc = fa;
     }
 
     const tol = 2 * Number.EPSILON * Math.abs(b) + tolerance;
     const m = 0.5 * (c - b);
 
-    if (Math.abs(m) <= tol || Math.abs(fb) < tolerance) {
-      return b;
-    }
+    if (Math.abs(m) <= tol || Math.abs(fb) < tolerance) return b;
 
     if (Math.abs(e) >= tol && Math.abs(fa) > Math.abs(fb)) {
       const s_val = fb / fa;
@@ -177,44 +128,28 @@ export function solveImpliedVol(
       let q_val: number;
 
       if (a === c) {
-        // Secant method
         p_val = 2 * m * s_val;
         q_val = 1 - s_val;
       } else {
-        // Inverse quadratic interpolation
         const q = fa / fc;
         const r = fb / fc;
         p_val = s_val * (2 * m * q * (q - r) - (b - a) * (r - 1));
         q_val = (q - 1) * (r - 1) * (s_val - 1);
       }
 
-      if (p_val > 0) {
-        q_val = -q_val;
-      } else {
-        p_val = -p_val;
-      }
+      if (p_val > 0) q_val = -q_val; else p_val = -p_val;
 
       if (2 * p_val < Math.min(3 * m * q_val - Math.abs(tol * q_val), Math.abs(e * q_val))) {
-        e = d;
-        d = p_val / q_val;
+        e = d; d = p_val / q_val;
       } else {
-        d = m;
-        e = m;
+        d = m; e = m;
       }
     } else {
-      d = m;
-      e = m;
+      d = m; e = m;
     }
 
-    a = b;
-    fa = fb;
-
-    if (Math.abs(d) > tol) {
-      b += d;
-    } else {
-      b += m > 0 ? tol : -tol;
-    }
-
+    a = b; fa = fb;
+    b += Math.abs(d) > tol ? d : (m > 0 ? tol : -tol);
     fb = f(b);
   }
 
@@ -222,25 +157,12 @@ export function solveImpliedVol(
 }
 
 /**
- * Calibrate implied volatilities for all selected strikes.
+ * Compute P&L projection curve.
+ * P&L = projected value - entry cost
+ * For YES: projected value = modelYesPrice; entry cost = entryPrice
+ * For NO: projected value = 1 - modelYesPrice; entry cost = entryPrice
  */
-export function calibrateStrikes(
-  spotPrice: number,
-  markets: Array<{ strikePrice: number; currentPrice: number }>,
-  tau: number,
-  optionType: OptionType
-): (number | null)[] {
-  return markets.map(({ strikePrice, currentPrice }) => {
-    if (strikePrice <= 0 || currentPrice <= 0) return null;
-    return solveImpliedVol(spotPrice, strikePrice, tau, currentPrice, optionType);
-  });
-}
-
-/**
- * Compute construction cost across a range of crypto prices.
- * For each crypto price X in the range, sums the model price of each selected strike.
- */
-export function computeProjectionCurve(
+export function computePnlCurve(
   strikes: SelectedStrike[],
   lowerPrice: number,
   upperPrice: number,
@@ -250,30 +172,29 @@ export function computeProjectionCurve(
 ): ProjectionPoint[] {
   if (strikes.length === 0 || numPoints < 2) return [];
 
+  const totalEntry = strikes.reduce((sum, s) => sum + s.entryPrice, 0);
   const step = (upperPrice - lowerPrice) / (numPoints - 1);
   const points: ProjectionPoint[] = [];
 
   for (let i = 0; i < numPoints; i++) {
     const cryptoPrice = lowerPrice + step * i;
-    let constructionCost = 0;
+    let projectedValue = 0;
 
     for (const strike of strikes) {
-      const price = priceOption(cryptoPrice, strike.strikePrice, strike.impliedVol, tau, optionType);
-      constructionCost += price;
+      const yesPrice = priceOptionYes(cryptoPrice, strike.strikePrice, strike.impliedVol, tau, optionType);
+      projectedValue += strike.side === 'YES' ? yesPrice : (1 - yesPrice);
     }
 
-    points.push({ cryptoPrice, constructionCost });
+    points.push({ cryptoPrice, pnl: projectedValue - totalEntry });
   }
 
   return points;
 }
 
 /**
- * Compute the at-expiry payoff (tau → 0).
- * For "above": each strike contributes 1 if cryptoPrice >= K, else 0
- * For "hit": same step function at expiry (model limit as tau→0⁺)
+ * Compute P&L at expiry (tau → 0).
  */
-export function computeExpiryPayoff(
+export function computeExpiryPnl(
   strikes: SelectedStrike[],
   lowerPrice: number,
   upperPrice: number,
@@ -281,18 +202,20 @@ export function computeExpiryPayoff(
 ): ProjectionPoint[] {
   if (strikes.length === 0 || numPoints < 2) return [];
 
+  const totalEntry = strikes.reduce((sum, s) => sum + s.entryPrice, 0);
   const step = (upperPrice - lowerPrice) / (numPoints - 1);
   const points: ProjectionPoint[] = [];
 
   for (let i = 0; i < numPoints; i++) {
     const cryptoPrice = lowerPrice + step * i;
-    let constructionCost = 0;
+    let projectedValue = 0;
 
     for (const strike of strikes) {
-      constructionCost += cryptoPrice >= strike.strikePrice ? 1 : 0;
+      const yesPayoff = cryptoPrice >= strike.strikePrice ? 1 : 0;
+      projectedValue += strike.side === 'YES' ? yesPayoff : (1 - yesPayoff);
     }
 
-    points.push({ cryptoPrice, constructionCost });
+    points.push({ cryptoPrice, pnl: projectedValue - totalEntry });
   }
 
   return points;

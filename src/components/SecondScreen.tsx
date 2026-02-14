@@ -4,17 +4,16 @@ import {
   Typography,
   Paper,
   Checkbox,
-  FormControlLabel,
   CircularProgress,
   IconButton,
   Chip,
   Alert,
-  TextField,
+  Slider,
 } from '@mui/material';
 import { ArrowBack } from '@mui/icons-material';
-import type { CryptoOption, OptionType, ParsedMarket, PolymarketEvent, SelectedStrike, ProjectionPoint } from '../types';
+import type { CryptoOption, OptionType, ParsedMarket, PolymarketEvent, SelectedStrike, ProjectionPoint, Side } from '../types';
 import { fetchCurrentPrice } from '../api/binance';
-import { solveImpliedVol, computeProjectionCurve, computeExpiryPayoff } from '../pricing/engine';
+import { solveImpliedVol, computePnlCurve, computeExpiryPnl } from '../pricing/engine';
 import { ProjectionChart } from './ProjectionChart';
 
 interface SecondScreenProps {
@@ -32,6 +31,17 @@ const CRYPTO_COLORS: Record<CryptoOption, string> = {
   XRP: '#23292F',
 };
 
+/** Round down to nearest "3 zeros" (1000 for values > 10k, 100 for > 1k, etc.) */
+function roundTo3Zeros(value: number, direction: 'down' | 'up'): number {
+  if (value <= 0) return 0;
+  const magnitude = Math.pow(10, Math.max(0, Math.floor(Math.log10(value)) - 1));
+  const rounded = magnitude >= 1000 ? Math.round(magnitude / 1000) * 1000 : magnitude;
+  const unit = Math.max(rounded, 1000);
+  return direction === 'down'
+    ? Math.floor(value / unit) * unit
+    : Math.ceil(value / unit) * unit;
+}
+
 function formatTimeToExpiry(seconds: number): string {
   if (seconds <= 0) return 'Expired';
   const days = Math.floor(seconds / 86400);
@@ -41,6 +51,16 @@ function formatTimeToExpiry(seconds: number): string {
   return `${hours}h ${minutes}m`;
 }
 
+function formatHours(seconds: number): string {
+  const h = Math.round(seconds / 3600);
+  return `${h}h`;
+}
+
+// Selection key: marketId-YES or marketId-NO
+function selKey(marketId: string, side: Side): string {
+  return `${marketId}-${side}`;
+}
+
 export function SecondScreen({
   event,
   markets,
@@ -48,29 +68,37 @@ export function SecondScreen({
   optionType,
   onBack,
 }: SecondScreenProps) {
-  const [selectedMarketIds, setSelectedMarketIds] = useState<Set<string>>(new Set());
+  const [selections, setSelections] = useState<Set<string>>(new Set());
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [loadingSpot, setLoadingSpot] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lowerPrice, setLowerPrice] = useState<string>('');
-  const [upperPrice, setUpperPrice] = useState<string>('');
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]);
+  const [sliderBounds, setSliderBounds] = useState<[number, number]>([0, 0]);
 
-  // Expiration from event
   const expirationTs = event.endDate;
   const nowTs = Math.floor(Date.now() / 1000);
   const timeToExpirySec = expirationTs - nowTs;
   const tauNow = Math.max(timeToExpirySec / (365.25 * 24 * 3600), 0);
+
+  // Compute slider bounds from strike prices
+  useEffect(() => {
+    if (markets.length === 0) return;
+    const strikes = markets.map((m) => m.strikePrice).filter((s) => s > 0);
+    if (strikes.length === 0) return;
+    const minStrike = Math.min(...strikes);
+    const maxStrike = Math.max(...strikes);
+    const lower = roundTo3Zeros(minStrike * 0.9, 'down');
+    const upper = roundTo3Zeros(maxStrike * 1.1, 'up');
+    setSliderBounds([lower, upper]);
+    setPriceRange([lower, upper]);
+  }, [markets]);
 
   // Fetch current crypto price
   useEffect(() => {
     if (!crypto) return;
     setLoadingSpot(true);
     fetchCurrentPrice(crypto)
-      .then((price) => {
-        setSpotPrice(price);
-        setLowerPrice((price * 0.7).toFixed(0));
-        setUpperPrice((price * 1.3).toFixed(0));
-      })
+      .then((price) => setSpotPrice(price))
       .catch((err) => {
         console.error('Failed to fetch spot price:', err);
         setError(`Failed to fetch ${crypto} price`);
@@ -78,59 +106,88 @@ export function SecondScreen({
       .finally(() => setLoadingSpot(false));
   }, [crypto]);
 
-  const handleToggleMarket = useCallback((marketId: string) => {
-    setSelectedMarketIds((prev) => {
+  const handleToggle = useCallback((marketId: string, side: Side) => {
+    setSelections((prev) => {
       const next = new Set(prev);
-      if (next.has(marketId)) {
-        next.delete(marketId);
-      } else {
-        next.add(marketId);
-      }
+      const key = selKey(marketId, side);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   }, []);
 
-  // Calibrate IV for selected strikes
+  const handleSliderChange = useCallback((_: unknown, value: number | number[]) => {
+    setPriceRange(value as [number, number]);
+  }, []);
+
+  // Calibrate IV and build selected strikes
   const selectedStrikes: SelectedStrike[] = useMemo(() => {
     if (!spotPrice || tauNow <= 0) return [];
 
-    return markets
-      .filter((m) => selectedMarketIds.has(m.id))
-      .map((m) => {
-        const iv = solveImpliedVol(spotPrice, m.strikePrice, tauNow, m.currentPrice, optionType);
-        return {
-          marketId: m.id,
-          question: m.question,
-          groupItemTitle: m.groupItemTitle,
-          strikePrice: m.strikePrice,
-          currentPrice: m.currentPrice,
-          impliedVol: iv ?? 0.5,
-        };
+    const result: SelectedStrike[] = [];
+    for (const key of selections) {
+      const [marketId, sideStr] = key.split('-') as [string, Side];
+      const market = markets.find((m) => m.id === marketId);
+      if (!market || market.strikePrice <= 0) continue;
+
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType);
+      const side: Side = sideStr;
+      const entryPrice = side === 'YES' ? market.currentPrice : (1 - market.currentPrice);
+
+      result.push({
+        marketId: market.id,
+        question: market.question,
+        groupItemTitle: market.groupItemTitle,
+        strikePrice: market.strikePrice,
+        side,
+        entryPrice,
+        impliedVol: iv ?? 0.5,
       });
-  }, [markets, selectedMarketIds, spotPrice, tauNow, optionType]);
+    }
+    return result;
+  }, [markets, selections, spotPrice, tauNow, optionType]);
 
-  // Parse price range
-  const lower = parseFloat(lowerPrice) || 0;
-  const upper = parseFloat(upperPrice) || 0;
-  const validRange = lower > 0 && upper > lower;
+  // Curve labels with hours
+  const curveLabels = useMemo(() => {
+    const h1 = formatHours(timeToExpirySec);
+    const h2 = formatHours(timeToExpirySec * 2 / 3);
+    const h3 = formatHours(timeToExpirySec / 3);
+    return [
+      `Now (${h1} to exp)`,
+      `1/3 to expiry (${h2})`,
+      `2/3 to expiry (${h3})`,
+      'At expiry',
+    ];
+  }, [timeToExpirySec]);
 
-  // Compute 4 projection curves
+  // Compute 4 P&L curves
   const projectionCurves: ProjectionPoint[][] = useMemo(() => {
-    if (selectedStrikes.length === 0 || !validRange) return [];
+    const [lower, upper] = priceRange;
+    if (selectedStrikes.length === 0 || lower <= 0 || upper <= lower) return [];
 
     const tau1 = tauNow;
     const tau2 = tauNow * (2 / 3);
     const tau3 = tauNow * (1 / 3);
 
-    const curve1 = computeProjectionCurve(selectedStrikes, lower, upper, tau1, optionType);
-    const curve2 = computeProjectionCurve(selectedStrikes, lower, upper, tau2, optionType);
-    const curve3 = computeProjectionCurve(selectedStrikes, lower, upper, tau3, optionType);
-    const curve4 = computeExpiryPayoff(selectedStrikes, lower, upper);
-
-    return [curve1, curve2, curve3, curve4];
-  }, [selectedStrikes, lower, upper, tauNow, optionType, validRange]);
+    return [
+      computePnlCurve(selectedStrikes, lower, upper, tau1, optionType),
+      computePnlCurve(selectedStrikes, lower, upper, tau2, optionType),
+      computePnlCurve(selectedStrikes, lower, upper, tau3, optionType),
+      computeExpiryPnl(selectedStrikes, lower, upper),
+    ];
+  }, [selectedStrikes, priceRange, tauNow, optionType]);
 
   const expiryDate = new Date(expirationTs * 1000);
+  const hasSelections = selections.size > 0;
+  const validRange = priceRange[0] > 0 && priceRange[1] > priceRange[0];
+
+  // Slider step: scale based on range
+  const sliderStep = useMemo(() => {
+    const range = sliderBounds[1] - sliderBounds[0];
+    if (range > 100000) return 1000;
+    if (range > 10000) return 100;
+    if (range > 1000) return 10;
+    return 1;
+  }, [sliderBounds]);
 
   return (
     <Box
@@ -255,7 +312,7 @@ export function SecondScreen({
           >
             <CircularProgress />
           </Box>
-        ) : selectedMarketIds.size === 0 ? (
+        ) : !hasSelections ? (
           <Box
             sx={{
               height: '100%',
@@ -270,70 +327,62 @@ export function SecondScreen({
           >
             <Typography variant="h6">No strikes selected</Typography>
             <Typography variant="body2">
-              Select strikes below to see the projection chart
-            </Typography>
-          </Box>
-        ) : !validRange ? (
-          <Box
-            sx={{
-              height: '100%',
-              minHeight: 440,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'column',
-              gap: 2,
-              color: 'text.secondary',
-            }}
-          >
-            <Typography variant="h6">Set a valid price range</Typography>
-            <Typography variant="body2">
-              Enter lower and upper {crypto} prices below
+              Select YES or NO on strikes below to see the P&L projection
             </Typography>
           </Box>
         ) : projectionCurves.length > 0 && spotPrice ? (
           <ProjectionChart
             curves={projectionCurves}
+            curveLabels={curveLabels}
             currentCryptoPrice={spotPrice}
-            numStrikes={selectedMarketIds.size}
             cryptoSymbol={crypto || 'BTC'}
           />
         ) : null}
 
-        {/* Price Range Inputs */}
-        {!loadingSpot && (
+        {/* Price Range Slider */}
+        {!loadingSpot && sliderBounds[1] > sliderBounds[0] && (
           <Box
             sx={{
-              display: 'flex',
-              gap: 3,
               mt: 2,
               pt: 2,
+              px: 3,
               borderTop: '1px solid rgba(139, 157, 195, 0.1)',
-              justifyContent: 'center',
-              flexWrap: 'wrap',
             }}
           >
-            <TextField
-              label={`Lower ${crypto} Price`}
-              value={lowerPrice}
-              onChange={(e) => setLowerPrice(e.target.value)}
-              type="number"
-              size="small"
-              sx={{ width: 200 }}
-            />
-            <TextField
-              label={`Upper ${crypto} Price`}
-              value={upperPrice}
-              onChange={(e) => setUpperPrice(e.target.value)}
-              type="number"
-              size="small"
-              sx={{ width: 200 }}
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                ${priceRange[0].toLocaleString()}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                {crypto} Price Range
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                ${priceRange[1].toLocaleString()}
+              </Typography>
+            </Box>
+            <Slider
+              value={priceRange}
+              onChange={handleSliderChange}
+              min={sliderBounds[0]}
+              max={sliderBounds[1]}
+              step={sliderStep}
+              valueLabelDisplay="auto"
+              valueLabelFormat={(v) => `$${v.toLocaleString()}`}
+              sx={{
+                color: '#00D1FF',
+                '& .MuiSlider-thumb': {
+                  bgcolor: '#00D1FF',
+                  '&:hover': { boxShadow: '0 0 8px rgba(0, 209, 255, 0.4)' },
+                },
+                '& .MuiSlider-track': { bgcolor: '#00D1FF' },
+                '& .MuiSlider-rail': { bgcolor: 'rgba(139, 157, 195, 0.2)' },
+              }}
             />
           </Box>
         )}
       </Paper>
 
-      {/* Strike Selection */}
+      {/* Strike Selection — Single Column Polymarket Style */}
       <Paper
         elevation={0}
         sx={{
@@ -344,66 +393,145 @@ export function SecondScreen({
         <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
           Select Strikes
         </Typography>
+
+        {/* Header row */}
         <Box
           sx={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: 2,
+            gridTemplateColumns: '1fr 120px 120px',
+            gap: 1,
+            mb: 1,
+            px: 2,
           }}
         >
-          {markets.map((market) => {
-            const isSelected = selectedMarketIds.has(market.id);
-            const ivInfo = selectedStrikes.find((s) => s.marketId === market.id);
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+            Strike
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, textAlign: 'center' }}>
+            YES
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, textAlign: 'center' }}>
+            NO
+          </Typography>
+        </Box>
 
-            return (
-              <Paper
-                key={market.id}
-                elevation={0}
+        {/* Rows */}
+        {markets.map((market) => {
+          const yesKey = selKey(market.id, 'YES');
+          const noKey = selKey(market.id, 'NO');
+          const yesSelected = selections.has(yesKey);
+          const noSelected = selections.has(noKey);
+          const yesPrice = market.currentPrice;
+          const noPrice = 1 - market.currentPrice;
+          const ivInfo = selectedStrikes.find((s) => s.marketId === market.id);
+
+          return (
+            <Box
+              key={market.id}
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 120px 120px',
+                gap: 1,
+                alignItems: 'center',
+                px: 2,
+                py: 1,
+                borderRadius: 1,
+                bgcolor: (yesSelected || noSelected) ? 'rgba(0, 209, 255, 0.03)' : 'transparent',
+                borderBottom: '1px solid rgba(139, 157, 195, 0.06)',
+                '&:hover': { bgcolor: 'rgba(139, 157, 195, 0.04)' },
+              }}
+            >
+              {/* Strike info */}
+              <Box>
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  {market.groupItemTitle || market.question}
+                </Typography>
+                {ivInfo && (
+                  <Typography variant="caption" sx={{ color: '#00D1FF' }}>
+                    IV: {(ivInfo.impliedVol * 100).toFixed(1)}%
+                  </Typography>
+                )}
+              </Box>
+
+              {/* YES */}
+              <Box
                 sx={{
-                  p: 2,
-                  bgcolor: isSelected ? 'rgba(0, 209, 255, 0.05)' : 'rgba(10, 14, 23, 0.5)',
-                  border: isSelected
-                    ? '1px solid rgba(0, 209, 255, 0.3)'
-                    : '1px solid rgba(139, 157, 195, 0.1)',
-                  borderRadius: 2,
-                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 0.5,
                 }}
               >
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={isSelected}
-                      onChange={() => handleToggleMarket(market.id)}
-                      sx={{
-                        '&.Mui-checked': { color: '#00D1FF' },
-                      }}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                        {market.groupItemTitle || market.question}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Price: {(market.currentPrice * 100).toFixed(1)}%
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Strike: ${market.strikePrice.toLocaleString()}
-                        </Typography>
-                        {ivInfo && (
-                          <Typography variant="body2" sx={{ color: '#00D1FF' }}>
-                            IV: {(ivInfo.impliedVol * 100).toFixed(1)}%
-                          </Typography>
-                        )}
-                      </Box>
-                    </Box>
-                  }
+                <Checkbox
+                  checked={yesSelected}
+                  onChange={() => handleToggle(market.id, 'YES')}
+                  size="small"
+                  sx={{ '&.Mui-checked': { color: '#22C55E' }, p: 0.5 }}
                 />
-              </Paper>
-            );
-          })}
-        </Box>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: yesSelected ? '#22C55E' : 'text.secondary',
+                    fontWeight: yesSelected ? 600 : 400,
+                    minWidth: 45,
+                    textAlign: 'right',
+                  }}
+                >
+                  {(yesPrice * 100).toFixed(1)}¢
+                </Typography>
+              </Box>
+
+              {/* NO */}
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 0.5,
+                }}
+              >
+                <Checkbox
+                  checked={noSelected}
+                  onChange={() => handleToggle(market.id, 'NO')}
+                  size="small"
+                  sx={{ '&.Mui-checked': { color: '#EF4444' }, p: 0.5 }}
+                />
+                <Typography
+                  variant="body2"
+                  sx={{
+                    color: noSelected ? '#EF4444' : 'text.secondary',
+                    fontWeight: noSelected ? 600 : 400,
+                    minWidth: 45,
+                    textAlign: 'right',
+                  }}
+                >
+                  {(noPrice * 100).toFixed(1)}¢
+                </Typography>
+              </Box>
+            </Box>
+          );
+        })}
+
+        {/* Entry cost summary */}
+        {selectedStrikes.length > 0 && (
+          <Box
+            sx={{
+              mt: 2,
+              pt: 2,
+              borderTop: '1px solid rgba(139, 157, 195, 0.15)',
+              display: 'flex',
+              gap: 3,
+              justifyContent: 'center',
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              Positions: {selectedStrikes.length}
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#00D1FF', fontWeight: 600 }}>
+              Entry cost: {selectedStrikes.reduce((sum, s) => sum + s.entryPrice, 0).toFixed(4)}
+            </Typography>
+          </Box>
+        )}
       </Paper>
     </Box>
   );
