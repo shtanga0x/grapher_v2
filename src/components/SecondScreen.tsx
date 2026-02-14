@@ -337,6 +337,7 @@ export function SecondScreen({
             curveLabels={curveLabels}
             currentCryptoPrice={spotPrice}
             cryptoSymbol={crypto || 'BTC'}
+            totalEntryCost={selectedStrikes.reduce((sum, s) => sum + s.entryPrice, 0)}
           />
         ) : null}
 

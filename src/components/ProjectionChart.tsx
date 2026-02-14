@@ -11,13 +11,17 @@ import {
 } from 'recharts';
 import type { ProjectionPoint } from '../types';
 
-const CURVE_COLORS = ['#00D1FF', '#FF6B35', '#22C55E', '#A78BFA'];
+// Now = orange dashed; 1/3, 2/3, expiry = gradient (set per-line via SVG gradient)
+const NOW_COLOR = '#FF6B35';
+const GREEN = '#22C55E';
+const RED = '#EF4444';
 
 interface ProjectionChartProps {
   curves: ProjectionPoint[][]; // 4 curves: now, 1/3, 2/3, expiry
   curveLabels: string[];
   currentCryptoPrice: number;
   cryptoSymbol: string;
+  totalEntryCost: number;
 }
 
 interface ChartDataRow {
@@ -36,6 +40,11 @@ const TOOLTIP_STYLE: React.CSSProperties = {
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
+// Line styles: [Now, 1/3, 2/3, Expiry]
+const LINE_WIDTHS = [2, 1.5, 2, 2.5];
+const LINE_OPACITIES = [1, 0.45, 0.7, 1];
+const LINE_DASHES = ['6 3', undefined, undefined, undefined] as const;
+
 function getTickIntervals(range: number): { major: number; minor: number } {
   if (range > 100000) return { major: 10000, minor: 1000 };
   if (range > 50000) return { major: 5000, minor: 1000 };
@@ -45,7 +54,12 @@ function getTickIntervals(range: number): { major: number; minor: number } {
   return { major: 100, minor: 10 };
 }
 
-/** Custom X-axis tick that renders major ticks with labels and minor ticks as small marks */
+function formatPct(value: number): string {
+  const sign = value >= 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)}%`;
+}
+
+/** Custom X-axis tick */
 function CustomXTick(props: {
   x: number;
   y: number;
@@ -74,7 +88,6 @@ function CustomXTick(props: {
     );
   }
 
-  // Minor tick — small mark only
   return (
     <g transform={`translate(${x},${y})`}>
       <line y1={0} y2={4} stroke="rgba(139, 157, 195, 0.3)" strokeWidth={1} />
@@ -82,13 +95,15 @@ function CustomXTick(props: {
   );
 }
 
-/** Custom tooltip that renders items in fixed order (same as curveLabels) */
+/** Custom tooltip with BTC % change and P&L % return */
 function CustomTooltipContent({
   active,
   payload,
   curveLabels,
   cryptoSymbol,
   hiddenCurves,
+  currentCryptoPrice,
+  totalEntryCost,
 }: {
   active?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,13 +112,16 @@ function CustomTooltipContent({
   curveLabels: string[];
   cryptoSymbol: string;
   hiddenCurves: Set<number>;
+  currentCryptoPrice: number;
+  totalEntryCost: number;
 }) {
   if (!active || !payload || payload.length === 0) return null;
 
   const cryptoPrice = payload[0]?.payload?.cryptoPrice;
   if (cryptoPrice == null) return null;
 
-  // Build a map from name → value
+  const pricePct = ((cryptoPrice - currentCryptoPrice) / currentCryptoPrice) * 100;
+
   const valueMap = new Map<string, number>();
   for (const entry of payload) {
     if (entry.name && entry.value != null) {
@@ -114,15 +132,17 @@ function CustomTooltipContent({
   return (
     <div style={TOOLTIP_STYLE}>
       <div style={{ color: '#8B9DC3', marginBottom: 6, fontSize: 14 }}>
-        {cryptoSymbol}: ${cryptoPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+        {cryptoSymbol}: ${cryptoPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })} ({formatPct(pricePct)})
       </div>
       {curveLabels.map((label, i) => {
         if (hiddenCurves.has(i)) return null;
-        const val = valueMap.get(label);
-        if (val == null) return null;
+        const pnl = valueMap.get(label);
+        if (pnl == null) return null;
+        const pnlPct = totalEntryCost > 0 ? (pnl / totalEntryCost) * 100 : 0;
+        const color = i === 0 ? NOW_COLOR : (pnl >= 0 ? GREEN : RED);
         return (
-          <div key={label} style={{ color: CURVE_COLORS[i], fontSize: 13, padding: '2px 0' }}>
-            {label}: {val.toFixed(4)}
+          <div key={label} style={{ color, fontSize: 13, padding: '2px 0' }}>
+            {label}: {pnl.toFixed(4)} ({formatPct(pnlPct)})
           </div>
         );
       })}
@@ -135,6 +155,7 @@ export function ProjectionChart({
   curveLabels,
   currentCryptoPrice,
   cryptoSymbol,
+  totalEntryCost,
 }: ProjectionChartProps) {
   const [hiddenCurves, setHiddenCurves] = useState<Set<number>>(new Set());
 
@@ -166,7 +187,14 @@ export function ProjectionChart({
     return [min - pad, max + pad];
   }, [curves, hiddenCurves]);
 
-  // Generate all tick positions (both major and minor)
+  // Compute where y=0 falls as fraction from top (for SVG gradient)
+  const zeroOffset = useMemo(() => {
+    const [yMin, yMax] = yDomain;
+    if (yMax <= yMin) return 0.5;
+    const offset = yMax / (yMax - yMin);
+    return Math.max(0, Math.min(1, offset));
+  }, [yDomain]);
+
   const { allTicks, majorInterval, minorInterval, xDomain } = useMemo(() => {
     if (chartData.length === 0) return { allTicks: [], majorInterval: 1000, minorInterval: 100, xDomain: [0, 1] };
     const min = chartData[0].cryptoPrice;
@@ -192,7 +220,6 @@ export function ProjectionChart({
     });
   }, []);
 
-  // Memoize the custom tick renderer with intervals baked in
   const renderTick = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => (
@@ -201,7 +228,6 @@ export function ProjectionChart({
     [majorInterval, minorInterval]
   );
 
-  // Memoize custom tooltip renderer
   const renderTooltip = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => (
@@ -210,17 +236,31 @@ export function ProjectionChart({
         curveLabels={curveLabels}
         cryptoSymbol={cryptoSymbol}
         hiddenCurves={hiddenCurves}
+        currentCryptoPrice={currentCryptoPrice}
+        totalEntryCost={totalEntryCost}
       />
     ),
-    [curveLabels, cryptoSymbol, hiddenCurves]
+    [curveLabels, cryptoSymbol, hiddenCurves, currentCryptoPrice, totalEntryCost]
   );
 
   if (chartData.length === 0) return null;
+
+  // Gradient id suffix and stroke per line index
+  const getStroke = (i: number) => (i === 0 ? NOW_COLOR : `url(#pnlGradient)`);
 
   return (
     <div>
       <ResponsiveContainer width="100%" minHeight={600}>
         <LineChart data={chartData} margin={CHART_MARGIN}>
+          {/* SVG gradient for green (above 0) / red (below 0) */}
+          <defs>
+            <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={GREEN} />
+              <stop offset={`${(zeroOffset * 100).toFixed(1)}%`} stopColor={GREEN} />
+              <stop offset={`${(zeroOffset * 100).toFixed(1)}%`} stopColor={RED} />
+              <stop offset="100%" stopColor={RED} />
+            </linearGradient>
+          </defs>
           <CartesianGrid {...GRID_STYLE} />
           <XAxis
             dataKey="cryptoPrice"
@@ -274,44 +314,48 @@ export function ProjectionChart({
               type="monotone"
               dataKey={label}
               name={label}
-              stroke={CURVE_COLORS[i]}
-              strokeWidth={i === 3 ? 3 : 2}
-              strokeDasharray={i === 3 ? '6 3' : undefined}
+              stroke={getStroke(i)}
+              strokeWidth={LINE_WIDTHS[i]}
+              strokeDasharray={LINE_DASHES[i]}
               dot={false}
               activeDot={ACTIVE_DOT}
               connectNulls
               hide={hiddenCurves.has(i)}
-              strokeOpacity={hiddenCurves.has(i) ? 0.2 : 1}
+              strokeOpacity={hiddenCurves.has(i) ? 0.15 : LINE_OPACITIES[i]}
             />
           ))}
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Custom legend rendered outside chart — fixed order, no Recharts sorting */}
+      {/* Custom legend — fixed order */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 24, paddingTop: 12, flexWrap: 'wrap' }}>
-        {curveLabels.map((label, i) => (
-          <div
-            key={label}
-            onClick={() => handleLegendClick(i)}
-            style={{
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              opacity: hiddenCurves.has(i) ? 0.3 : 1,
-            }}
-          >
+        {curveLabels.map((label, i) => {
+          const legendColor = i === 0 ? NOW_COLOR : '#8B9DC3';
+          return (
             <div
+              key={label}
+              onClick={() => handleLegendClick(i)}
               style={{
-                width: 16,
-                height: 3,
-                backgroundColor: CURVE_COLORS[i],
-                borderRadius: 2,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                opacity: hiddenCurves.has(i) ? 0.3 : 1,
               }}
-            />
-            <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
-          </div>
-        ))}
+            >
+              <div
+                style={{
+                  width: 16,
+                  height: LINE_WIDTHS[i],
+                  backgroundColor: legendColor,
+                  borderRadius: 2,
+                  borderTop: i === 0 ? `2px dashed ${NOW_COLOR}` : undefined,
+                }}
+              />
+              <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
