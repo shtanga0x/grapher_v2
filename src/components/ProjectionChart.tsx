@@ -11,7 +11,6 @@ import {
 } from 'recharts';
 import type { ProjectionPoint } from '../types';
 
-// Now = orange dashed; 1/3, 2/3, expiry = gradient (set per-line via SVG gradient)
 const NOW_COLOR = '#FF6B35';
 const GREEN = '#22C55E';
 const RED = '#EF4444';
@@ -40,10 +39,9 @@ const TOOLTIP_STYLE: React.CSSProperties = {
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
-// Line styles: [Now, 1/3, 2/3, Expiry]
+// Line styles per curve index: [Now, 1/3, 2/3, Expiry]
 const LINE_WIDTHS = [2, 1.5, 2, 2.5];
 const LINE_OPACITIES = [1, 0.45, 0.7, 1];
-const LINE_DASHES = ['6 3', undefined, undefined, undefined] as const;
 
 function getTickIntervals(range: number): { major: number; minor: number } {
   if (range > 100000) return { major: 10000, minor: 1000 };
@@ -59,7 +57,6 @@ function formatPct(value: number): string {
   return `${sign}${value.toFixed(1)}%`;
 }
 
-/** Custom X-axis tick */
 function CustomXTick(props: {
   x: number;
   y: number;
@@ -75,13 +72,7 @@ function CustomXTick(props: {
     return (
       <g transform={`translate(${x},${y})`}>
         <line y1={0} y2={8} stroke="#8B9DC3" strokeWidth={1} />
-        <text
-          y={22}
-          textAnchor="middle"
-          fill="#8B9DC3"
-          fontSize={12}
-          fontFamily="JetBrains Mono, monospace"
-        >
+        <text y={22} textAnchor="middle" fill="#8B9DC3" fontSize={12} fontFamily="JetBrains Mono, monospace">
           ${value.toLocaleString()}
         </text>
       </g>
@@ -95,7 +86,6 @@ function CustomXTick(props: {
   );
 }
 
-/** Custom tooltip with BTC % change and P&L % return */
 function CustomTooltipContent({
   active,
   payload,
@@ -122,10 +112,13 @@ function CustomTooltipContent({
 
   const pricePct = ((cryptoPrice - currentCryptoPrice) / currentCryptoPrice) * 100;
 
+  // Merge __pos / __neg keys back to base label
   const valueMap = new Map<string, number>();
   for (const entry of payload) {
-    if (entry.name && entry.value != null) {
-      valueMap.set(entry.name, entry.value);
+    const name = entry.name as string;
+    if (name && entry.value != null) {
+      const baseName = name.replace(/__pos$|__neg$/, '');
+      valueMap.set(baseName, entry.value);
     }
   }
 
@@ -166,7 +159,18 @@ export function ProjectionChart({
       const row: ChartDataRow = { cryptoPrice: point.cryptoPrice };
       for (let c = 0; c < curves.length; c++) {
         if (curves[c][i]) {
-          row[curveLabels[c]] = curves[c][i].pnl;
+          const pnl = curves[c][i].pnl;
+          if (c === 0) {
+            // Now line: single key, orange
+            row[curveLabels[c]] = pnl;
+          } else {
+            // 1/3, 2/3, expiry: split into pos (green) / neg (red)
+            if (pnl >= 0) {
+              row[`${curveLabels[c]}__pos`] = pnl;
+            } else {
+              row[`${curveLabels[c]}__neg`] = pnl;
+            }
+          }
         }
       }
       return row;
@@ -186,14 +190,6 @@ export function ProjectionChart({
     const pad = Math.max(0.1, (max - min) * 0.1);
     return [min - pad, max + pad];
   }, [curves, hiddenCurves]);
-
-  // Compute where y=0 falls as fraction from top (for SVG gradient)
-  const zeroOffset = useMemo(() => {
-    const [yMin, yMax] = yDomain;
-    if (yMax <= yMin) return 0.5;
-    const offset = yMax / (yMax - yMin);
-    return Math.max(0, Math.min(1, offset));
-  }, [yDomain]);
 
   const { allTicks, majorInterval, minorInterval, xDomain } = useMemo(() => {
     if (chartData.length === 0) return { allTicks: [], majorInterval: 1000, minorInterval: 100, xDomain: [0, 1] };
@@ -245,22 +241,10 @@ export function ProjectionChart({
 
   if (chartData.length === 0) return null;
 
-  // Gradient id suffix and stroke per line index
-  const getStroke = (i: number) => (i === 0 ? NOW_COLOR : `url(#pnlGradient)`);
-
   return (
     <div>
       <ResponsiveContainer width="100%" minHeight={600}>
         <LineChart data={chartData} margin={CHART_MARGIN}>
-          {/* SVG gradient for green (above 0) / red (below 0) */}
-          <defs>
-            <linearGradient id="pnlGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={GREEN} />
-              <stop offset={`${(zeroOffset * 100).toFixed(1)}%`} stopColor={GREEN} />
-              <stop offset={`${(zeroOffset * 100).toFixed(1)}%`} stopColor={RED} />
-              <stop offset="100%" stopColor={RED} />
-            </linearGradient>
-          </defs>
           <CartesianGrid {...GRID_STYLE} />
           <XAxis
             dataKey="cryptoPrice"
@@ -308,54 +292,80 @@ export function ProjectionChart({
             }}
           />
 
-          {curveLabels.map((label, i) => (
+          {/* Now line: orange, dashed */}
+          <Line
+            type="monotone"
+            dataKey={curveLabels[0]}
+            name={curveLabels[0]}
+            stroke={NOW_COLOR}
+            strokeWidth={LINE_WIDTHS[0]}
+            strokeDasharray="6 3"
+            dot={false}
+            activeDot={ACTIVE_DOT}
+            connectNulls
+            hide={hiddenCurves.has(0)}
+            strokeOpacity={hiddenCurves.has(0) ? 0.15 : LINE_OPACITIES[0]}
+          />
+
+          {/* 1/3, 2/3, Expiry: split into green (>=0) and red (<0) lines */}
+          {[1, 2, 3].map((i) => [
             <Line
-              key={label}
+              key={`${curveLabels[i]}__pos`}
               type="monotone"
-              dataKey={label}
-              name={label}
-              stroke={getStroke(i)}
+              dataKey={`${curveLabels[i]}__pos`}
+              name={`${curveLabels[i]}__pos`}
+              stroke={GREEN}
               strokeWidth={LINE_WIDTHS[i]}
-              strokeDasharray={LINE_DASHES[i]}
               dot={false}
               activeDot={ACTIVE_DOT}
-              connectNulls
+              connectNulls={false}
               hide={hiddenCurves.has(i)}
               strokeOpacity={hiddenCurves.has(i) ? 0.15 : LINE_OPACITIES[i]}
-            />
-          ))}
+              legendType="none"
+            />,
+            <Line
+              key={`${curveLabels[i]}__neg`}
+              type="monotone"
+              dataKey={`${curveLabels[i]}__neg`}
+              name={`${curveLabels[i]}__neg`}
+              stroke={RED}
+              strokeWidth={LINE_WIDTHS[i]}
+              dot={false}
+              activeDot={ACTIVE_DOT}
+              connectNulls={false}
+              hide={hiddenCurves.has(i)}
+              strokeOpacity={hiddenCurves.has(i) ? 0.15 : LINE_OPACITIES[i]}
+              legendType="none"
+            />,
+          ])}
         </LineChart>
       </ResponsiveContainer>
 
       {/* Custom legend — fixed order */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 24, paddingTop: 12, flexWrap: 'wrap' }}>
-        {curveLabels.map((label, i) => {
-          const legendColor = i === 0 ? NOW_COLOR : '#8B9DC3';
-          return (
-            <div
-              key={label}
-              onClick={() => handleLegendClick(i)}
-              style={{
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                opacity: hiddenCurves.has(i) ? 0.3 : 1,
-              }}
-            >
-              <div
-                style={{
-                  width: 16,
-                  height: LINE_WIDTHS[i],
-                  backgroundColor: legendColor,
-                  borderRadius: 2,
-                  borderTop: i === 0 ? `2px dashed ${NOW_COLOR}` : undefined,
-                }}
-              />
-              <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
-            </div>
-          );
-        })}
+        {curveLabels.map((label, i) => (
+          <div
+            key={label}
+            onClick={() => handleLegendClick(i)}
+            style={{
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: hiddenCurves.has(i) ? 0.3 : 1,
+            }}
+          >
+            {i === 0 ? (
+              <div style={{ width: 16, height: 0, borderTop: `2px dashed ${NOW_COLOR}` }} />
+            ) : (
+              <div style={{ display: 'flex', width: 16, height: LINE_WIDTHS[i] }}>
+                <div style={{ flex: 1, backgroundColor: GREEN, borderRadius: '2px 0 0 2px' }} />
+                <div style={{ flex: 1, backgroundColor: RED, borderRadius: '0 2px 2px 0' }} />
+              </div>
+            )}
+            <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
