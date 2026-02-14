@@ -26,14 +26,14 @@ interface ChartDataRow {
   [key: string]: number;
 }
 
-const CHART_MARGIN = { top: 20, right: 30, bottom: 70, left: 20 };
+const CHART_MARGIN = { top: 20, right: 30, bottom: 50, left: 20 };
 const GRID_STYLE = { strokeDasharray: '3 3', stroke: 'rgba(139, 157, 195, 0.1)' };
 const TOOLTIP_STYLE = {
   backgroundColor: 'rgba(19, 26, 42, 0.95)',
   border: '1px solid rgba(139, 157, 195, 0.3)',
   borderRadius: 8,
 };
-const LEGEND_WRAPPER_STYLE = { paddingTop: 40, cursor: 'pointer' };
+const LEGEND_WRAPPER_STYLE = { paddingTop: 20, cursor: 'pointer' };
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
@@ -201,12 +201,6 @@ export function ProjectionChart({
           stroke="#8B9DC3"
           tickLine={false}
           interval={0}
-          label={{
-            value: `${cryptoSymbol} Price`,
-            position: 'insideBottom',
-            offset: -30,
-            style: { fill: '#8B9DC3' },
-          }}
         />
         <YAxis
           domain={yDomain}
