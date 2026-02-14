@@ -155,16 +155,15 @@ export function ProjectionChart({
   const chartData = useMemo(() => {
     if (curves.length === 0 || curves[0].length === 0) return [];
 
-    return curves[0].map((point, i) => {
+    // First pass: split pos/neg
+    const data = curves[0].map((point, i) => {
       const row: ChartDataRow = { cryptoPrice: point.cryptoPrice };
       for (let c = 0; c < curves.length; c++) {
         if (curves[c][i]) {
           const pnl = curves[c][i].pnl;
           if (c === 0) {
-            // Now line: single key, orange
             row[curveLabels[c]] = pnl;
           } else {
-            // 1/3, 2/3, expiry: split into pos (green) / neg (red)
             if (pnl >= 0) {
               row[`${curveLabels[c]}__pos`] = pnl;
             } else {
@@ -175,6 +174,29 @@ export function ProjectionChart({
       }
       return row;
     });
+
+    // Second pass: bridge sign changes with green so lines stay connected
+    for (let i = 0; i < data.length - 1; i++) {
+      for (let c = 1; c < curves.length; c++) {
+        const posKey = `${curveLabels[c]}__pos`;
+        const negKey = `${curveLabels[c]}__neg`;
+        const hasPosNow = posKey in data[i];
+        const hasPosNext = posKey in data[i + 1];
+        const hasNegNow = negKey in data[i];
+        const hasNegNext = negKey in data[i + 1];
+
+        // Negative → positive: include the negative point in green to bridge
+        if (hasNegNow && hasPosNext) {
+          data[i][posKey] = data[i][negKey];
+        }
+        // Positive → negative: include the negative point in green to bridge
+        if (hasPosNow && hasNegNext) {
+          data[i + 1][posKey] = data[i + 1][negKey];
+        }
+      }
+    }
+
+    return data;
   }, [curves, curveLabels]);
 
   const yDomain = useMemo(() => {
