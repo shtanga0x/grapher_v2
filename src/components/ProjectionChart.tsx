@@ -28,7 +28,7 @@ interface ChartDataRow {
   [key: string]: number;
 }
 
-const CHART_MARGIN = { top: 20, right: 30, bottom: 50, left: 20 };
+const CHART_MARGIN = { top: 20, right: 60, bottom: 50, left: 20 };
 const GRID_STYLE = { strokeDasharray: '3 3', stroke: 'rgba(139, 157, 195, 0.1)' };
 const TOOLTIP_STYLE: React.CSSProperties = {
   backgroundColor: 'rgba(19, 26, 42, 0.95)',
@@ -131,11 +131,13 @@ function CustomTooltipContent({
         if (hiddenCurves.has(i)) return null;
         const pnl = valueMap.get(label);
         if (pnl == null) return null;
+        const cost = pnl + totalEntryCost;
         const pnlPct = totalEntryCost > 0 ? (pnl / totalEntryCost) * 100 : 0;
+        const pnlSign = pnl >= 0 ? '+' : '';
         const color = i === 0 ? NOW_COLOR : (pnl >= 0 ? GREEN : RED);
         return (
           <div key={label} style={{ color, fontSize: 13, padding: '2px 0' }}>
-            {label}: {pnl.toFixed(4)} ({formatPct(pnlPct)})
+            {label}: {cost.toFixed(4)} / {pnlSign}{pnl.toFixed(4)} ({formatPct(pnlPct)})
           </div>
         );
       })}
@@ -228,7 +230,8 @@ export function ProjectionChart({
     return { allTicks: ticks, majorInterval: major, minorInterval: minor, xDomain: [min, max] };
   }, [chartData]);
 
-  const formatYAxis = useCallback((v: number) => v.toFixed(2), []);
+  const formatYAxisCost = useCallback((v: number) => (v + totalEntryCost).toFixed(2), [totalEntryCost]);
+  const formatYAxisPnl = useCallback((v: number) => v.toFixed(2), []);
 
   const handleLegendClick = useCallback((idx: number) => {
     setHiddenCurves((prev) => {
@@ -279,19 +282,36 @@ export function ProjectionChart({
             interval={0}
           />
           <YAxis
+            yAxisId="left"
+            orientation="left"
             domain={yDomain}
-            tickFormatter={formatYAxis}
+            tickFormatter={formatYAxisCost}
             stroke="#8B9DC3"
             fontSize={13}
             label={{
-              value: 'P&L',
+              value: 'Cost',
               angle: -90,
               position: 'insideLeft',
               style: { fill: '#8B9DC3', fontSize: 14 },
             }}
           />
+          <YAxis
+            yAxisId="right"
+            orientation="right"
+            domain={yDomain}
+            tickFormatter={formatYAxisPnl}
+            stroke="#8B9DC3"
+            fontSize={13}
+            label={{
+              value: 'P&L',
+              angle: 90,
+              position: 'insideRight',
+              style: { fill: '#8B9DC3', fontSize: 14 },
+            }}
+          />
           <Tooltip content={renderTooltip} />
           <ReferenceLine
+            yAxisId="left"
             y={0}
             stroke="rgba(139, 157, 195, 0.6)"
             strokeDasharray="3 3"
@@ -304,6 +324,7 @@ export function ProjectionChart({
             }}
           />
           <ReferenceLine
+            yAxisId="left"
             x={currentCryptoPrice}
             {...REFERENCE_LINE_STYLE}
             label={{
@@ -316,6 +337,7 @@ export function ProjectionChart({
 
           {/* Now line: orange, dashed */}
           <Line
+            yAxisId="left"
             type="monotone"
             dataKey={curveLabels[0]}
             name={curveLabels[0]}
@@ -333,6 +355,7 @@ export function ProjectionChart({
           {[1, 2, 3].map((i) => [
             <Line
               key={`${curveLabels[i]}__pos`}
+              yAxisId="left"
               type="monotone"
               dataKey={`${curveLabels[i]}__pos`}
               name={`${curveLabels[i]}__pos`}
@@ -347,6 +370,7 @@ export function ProjectionChart({
             />,
             <Line
               key={`${curveLabels[i]}__neg`}
+              yAxisId="left"
               type="monotone"
               dataKey={`${curveLabels[i]}__neg`}
               name={`${curveLabels[i]}__neg`}
