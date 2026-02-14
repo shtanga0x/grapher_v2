@@ -6,7 +6,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
@@ -28,12 +27,12 @@ interface ChartDataRow {
 
 const CHART_MARGIN = { top: 20, right: 30, bottom: 50, left: 20 };
 const GRID_STYLE = { strokeDasharray: '3 3', stroke: 'rgba(139, 157, 195, 0.1)' };
-const TOOLTIP_STYLE = {
+const TOOLTIP_STYLE: React.CSSProperties = {
   backgroundColor: 'rgba(19, 26, 42, 0.95)',
   border: '1px solid rgba(139, 157, 195, 0.3)',
   borderRadius: 8,
+  padding: '10px 14px',
 };
-const LEGEND_WRAPPER_STYLE = { paddingTop: 20, cursor: 'pointer' };
 const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
@@ -80,6 +79,54 @@ function CustomXTick(props: {
     <g transform={`translate(${x},${y})`}>
       <line y1={0} y2={4} stroke="rgba(139, 157, 195, 0.3)" strokeWidth={1} />
     </g>
+  );
+}
+
+/** Custom tooltip that renders items in fixed order (same as curveLabels) */
+function CustomTooltipContent({
+  active,
+  payload,
+  curveLabels,
+  cryptoSymbol,
+  hiddenCurves,
+}: {
+  active?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload?: any[];
+  label?: number;
+  curveLabels: string[];
+  cryptoSymbol: string;
+  hiddenCurves: Set<number>;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const cryptoPrice = payload[0]?.payload?.cryptoPrice;
+  if (cryptoPrice == null) return null;
+
+  // Build a map from name → value
+  const valueMap = new Map<string, number>();
+  for (const entry of payload) {
+    if (entry.name && entry.value != null) {
+      valueMap.set(entry.name, entry.value);
+    }
+  }
+
+  return (
+    <div style={TOOLTIP_STYLE}>
+      <div style={{ color: '#8B9DC3', marginBottom: 6, fontSize: 13 }}>
+        {cryptoSymbol}: ${cryptoPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+      </div>
+      {curveLabels.map((label, i) => {
+        if (hiddenCurves.has(i)) return null;
+        const val = valueMap.get(label);
+        if (val == null) return null;
+        return (
+          <div key={label} style={{ color: CURVE_COLORS[i], fontSize: 12, padding: '2px 0' }}>
+            {label}: {val.toFixed(4)}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -137,45 +184,13 @@ export function ProjectionChart({
 
   const formatYAxis = useCallback((v: number) => v.toFixed(2), []);
 
-  const tooltipFormatter = useCallback(
-    (value: number, name: string) => [value.toFixed(4), name],
-    []
-  );
-
-  const tooltipLabelFormatter = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (label: number, payload: any[]) => {
-      const price = payload?.[0]?.payload?.cryptoPrice ?? label;
-      return `${cryptoSymbol}: $${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-    },
-    [cryptoSymbol]
-  );
-
-  const tooltipSorter = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (a: any, b: any) => {
-      const idxA = curveLabels.indexOf(a.name || '');
-      const idxB = curveLabels.indexOf(b.name || '');
-      return (idxA >= 0 ? idxA : 999) - (idxB >= 0 ? idxB : 999);
-    },
-    [curveLabels]
-  );
-
-  const handleLegendClick = useCallback((entry: { value?: string }) => {
-    if (!entry.value) return;
-    const idx = curveLabels.indexOf(entry.value);
-    if (idx === -1) return;
+  const handleLegendClick = useCallback((idx: number) => {
     setHiddenCurves((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx); else next.add(idx);
       return next;
     });
-  }, [curveLabels]);
-
-  const legendSorter = useCallback((item: { value?: string }) => {
-    const idx = curveLabels.indexOf(item.value || '');
-    return idx >= 0 ? idx : 999;
-  }, [curveLabels]);
+  }, []);
 
   // Memoize the custom tick renderer with intervals baked in
   const renderTick = useCallback(
@@ -186,81 +201,111 @@ export function ProjectionChart({
     [majorInterval, minorInterval]
   );
 
+  // Memoize custom tooltip renderer
+  const renderTooltip = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (props: any) => (
+      <CustomTooltipContent
+        {...props}
+        curveLabels={curveLabels}
+        cryptoSymbol={cryptoSymbol}
+        hiddenCurves={hiddenCurves}
+      />
+    ),
+    [curveLabels, cryptoSymbol, hiddenCurves]
+  );
+
   if (chartData.length === 0) return null;
 
   return (
-    <ResponsiveContainer width="100%" minHeight={600}>
-      <LineChart data={chartData} margin={CHART_MARGIN}>
-        <CartesianGrid {...GRID_STYLE} />
-        <XAxis
-          dataKey="cryptoPrice"
-          type="number"
-          domain={xDomain}
-          ticks={allTicks}
-          tick={renderTick}
-          stroke="#8B9DC3"
-          tickLine={false}
-          interval={0}
-        />
-        <YAxis
-          domain={yDomain}
-          tickFormatter={formatYAxis}
-          stroke="#8B9DC3"
-          fontSize={12}
-          label={{
-            value: 'P&L',
-            angle: -90,
-            position: 'insideLeft',
-            style: { fill: '#8B9DC3' },
-          }}
-        />
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={tooltipFormatter}
-          labelFormatter={tooltipLabelFormatter}
-          itemSorter={tooltipSorter}
-        />
-        <Legend
-          layout="horizontal"
-          align="center"
-          verticalAlign="bottom"
-          wrapperStyle={LEGEND_WRAPPER_STYLE}
-          onClick={handleLegendClick}
-          itemSorter={legendSorter}
-        />
-        <ReferenceLine
-          y={0}
-          stroke="rgba(139, 157, 195, 0.4)"
-          strokeDasharray="3 3"
-        />
-        <ReferenceLine
-          x={currentCryptoPrice}
-          {...REFERENCE_LINE_STYLE}
-          label={{
-            value: `Spot: $${currentCryptoPrice.toLocaleString()}`,
-            position: 'top',
-            fill: '#8B9DC3',
-            fontSize: 12,
-          }}
-        />
-
-        {curveLabels.map((label, i) => (
-          <Line
-            key={label}
-            type="monotone"
-            dataKey={label}
-            name={label}
-            stroke={CURVE_COLORS[i]}
-            strokeWidth={i === 3 ? 3 : 2}
-            strokeDasharray={i === 3 ? '6 3' : undefined}
-            dot={false}
-            activeDot={ACTIVE_DOT}
-            connectNulls
-            hide={hiddenCurves.has(i)}
-            strokeOpacity={hiddenCurves.has(i) ? 0.2 : 1}
+    <div>
+      <ResponsiveContainer width="100%" minHeight={600}>
+        <LineChart data={chartData} margin={CHART_MARGIN}>
+          <CartesianGrid {...GRID_STYLE} />
+          <XAxis
+            dataKey="cryptoPrice"
+            type="number"
+            domain={xDomain}
+            ticks={allTicks}
+            tick={renderTick}
+            stroke="#8B9DC3"
+            tickLine={false}
+            interval={0}
           />
+          <YAxis
+            domain={yDomain}
+            tickFormatter={formatYAxis}
+            stroke="#8B9DC3"
+            fontSize={12}
+            label={{
+              value: 'P&L',
+              angle: -90,
+              position: 'insideLeft',
+              style: { fill: '#8B9DC3' },
+            }}
+          />
+          <Tooltip content={renderTooltip} />
+          <ReferenceLine
+            y={0}
+            stroke="rgba(139, 157, 195, 0.4)"
+            strokeDasharray="3 3"
+          />
+          <ReferenceLine
+            x={currentCryptoPrice}
+            {...REFERENCE_LINE_STYLE}
+            label={{
+              value: `Spot: $${currentCryptoPrice.toLocaleString()}`,
+              position: 'top',
+              fill: '#8B9DC3',
+              fontSize: 12,
+            }}
+          />
+
+          {curveLabels.map((label, i) => (
+            <Line
+              key={label}
+              type="monotone"
+              dataKey={label}
+              name={label}
+              stroke={CURVE_COLORS[i]}
+              strokeWidth={i === 3 ? 3 : 2}
+              strokeDasharray={i === 3 ? '6 3' : undefined}
+              dot={false}
+              activeDot={ACTIVE_DOT}
+              connectNulls
+              hide={hiddenCurves.has(i)}
+              strokeOpacity={hiddenCurves.has(i) ? 0.2 : 1}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Custom legend rendered outside chart — fixed order, no Recharts sorting */}
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 24, paddingTop: 12, flexWrap: 'wrap' }}>
+        {curveLabels.map((label, i) => (
+          <div
+            key={label}
+            onClick={() => handleLegendClick(i)}
+            style={{
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              opacity: hiddenCurves.has(i) ? 0.3 : 1,
+            }}
+          >
+            <div
+              style={{
+                width: 16,
+                height: 3,
+                backgroundColor: CURVE_COLORS[i],
+                borderRadius: 2,
+              }}
+            />
+            <span style={{ color: '#8B9DC3', fontSize: 13 }}>{label}</span>
+          </div>
         ))}
-      </LineChart>
-    </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
