@@ -58,55 +58,24 @@ export function priceAbove(S: number, K: number, sigma: number, tau: number): nu
  * But we use the general form which handles both directions.
  */
 export function priceHit(S: number, H: number, sigma: number, tau: number): number {
-  // Already breached
-  if (H >= S && S >= H) return 1; // S === H
-  if (H > S && S >= H) return 1; // impossible but safe
-  // For up barrier: if S >= H, already touched
-  // For down barrier: if S <= H, already touched
-  if ((H > S) === false && (H < S) === false) return 1; // S === H
+  if (S === H) return 1;
 
   if (tau <= 0) {
-    // At expiry, model limit: step at barrier
-    return S >= H ? 1 : (S <= H && H < S ? 1 : 0);
+    return S >= H ? 1 : 0;
   }
   if (sigma <= 0) {
     return 0;
   }
 
+  // Standard one-touch barrier option (pays $1 at expiry if barrier touched)
+  // With drift μ = r - σ²/2, and r=0: μ = -σ²/2
+  // P = N((ln(H/S) - σ²τ/2)/(σ√τ)) + (S/H) · N((ln(H/S) + σ²τ/2)/(σ√τ))
   const sqrtTau = Math.sqrt(tau);
-  const logSH = Math.log(S / H);
+  const logHS = Math.log(H / S);
   const halfSigmaSqTau = (sigma * sigma * tau) / 2;
 
-  const d1 = (logSH + halfSigmaSqTau) / (sigma * sqrtTau);
-  const d2 = (logSH - halfSigmaSqTau) / (sigma * sqrtTau);
-
-  // With r=0, the drift coefficient λ = (r - σ²/2)/σ² = -1/2
-  // So (H/S)^(2λ) = (H/S)^(-1) = S/H
-  // One-touch = N(-d1') + (S/H) * N(d2')...
-  // Actually let me use the correct formula.
-  // For a one-touch option paying 1 if barrier H is ever touched:
-  // With r=0: P = N(a) + (H/S)^(2*(r-σ²/2)/σ² + 1) * N(b)
-  // With r=0: exponent = 2*(-σ²/2)/σ² + 1 = -1 + 1 = 0
-  // Wait, that gives (H/S)^0 = 1, so P = N(a) + N(b)
-
-  // Let me recalculate properly. For one-touch with r=0:
-  // The formula from the plan:
-  // P(S, H, σ, τ) = Φ(d₁) + (H/S) · Φ(d₂)
-  // This doesn't look right dimensionally for the standard one-touch.
-
-  // Standard one-touch barrier option (pays $1 at expiry if barrier touched):
-  // With drift μ = r - σ²/2, and r=0: μ = -σ²/2
-  // P = N((ln(H/S) + μτ)/(σ√τ)) + exp(2μ·ln(H/S)/σ²) · N((ln(H/S) - μτ)/(σ√τ))
-  // = N((-logSH - σ²τ/2)/(σ√τ)) + exp(-ln(H/S)) · N((-logSH + σ²τ/2)/(σ√τ))
-  // = N((-logSH - σ²τ/2)/(σ√τ)) + (S/H) · N((-logSH + σ²τ/2)/(σ√τ))
-
-  // For UP barrier (H > S), logSH < 0, so -logSH > 0
-  // For DOWN barrier (H < S), logSH > 0, so -logSH < 0
-  // The formula works for both cases.
-
-  const negLogSH = -logSH; // = ln(H/S)
-  const e1 = (negLogSH - halfSigmaSqTau) / (sigma * sqrtTau);
-  const e2 = (negLogSH + halfSigmaSqTau) / (sigma * sqrtTau);
+  const e1 = (logHS - halfSigmaSqTau) / (sigma * sqrtTau);
+  const e2 = (logHS + halfSigmaSqTau) / (sigma * sqrtTau);
 
   const price = normalCDF(e1) + (S / H) * normalCDF(e2);
   return Math.min(1, Math.max(0, price));
