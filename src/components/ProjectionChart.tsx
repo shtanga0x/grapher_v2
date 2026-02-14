@@ -337,6 +337,17 @@ export function ProjectionChart({
             }}
           />
 
+          {/* Invisible line to force right Y-axis tick rendering */}
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey={curveLabels[0]}
+            stroke="none"
+            dot={false}
+            activeDot={false}
+            legendType="none"
+          />
+
           {/* Now line: orange, dashed */}
           <Line
             yAxisId="left"
