@@ -129,7 +129,8 @@ export function SecondScreen({
       const market = markets.find((m) => m.id === marketId);
       if (!market || market.strikePrice <= 0) continue;
 
-      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType);
+      const isUpBarrier = market.strikePrice > spotPrice;
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier);
       const side: Side = sideStr;
       const entryPrice = side === 'YES' ? market.currentPrice : (1 - market.currentPrice);
 
@@ -141,6 +142,7 @@ export function SecondScreen({
         side,
         entryPrice,
         impliedVol: iv ?? 0.5,
+        isUpBarrier,
       });
     }
     return result;
@@ -172,7 +174,7 @@ export function SecondScreen({
       computePnlCurve(selectedStrikes, lower, upper, tau1, optionType),
       computePnlCurve(selectedStrikes, lower, upper, tau2, optionType),
       computePnlCurve(selectedStrikes, lower, upper, tau3, optionType),
-      computeExpiryPnl(selectedStrikes, lower, upper),
+      computeExpiryPnl(selectedStrikes, lower, upper, optionType),
     ];
   }, [selectedStrikes, priceRange, tauNow, optionType]);
 

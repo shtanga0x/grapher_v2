@@ -39,42 +39,68 @@ export function priceAbove(S: number, K: number, sigma: number, tau: number): nu
 }
 
 /**
- * One-touch barrier ("hit") YES price.
- * Probability that GBM starting at S touches barrier H before time τ (r=0).
- * When S ≥ H the barrier is already breached → price = 1.
- * Otherwise uses the reflection-principle formula for an UP barrier:
- *   P = Φ(d₁) + (S/H)·Φ(d₂)
- *   d₁ = (ln(S/H) − σ²τ/2) / (σ√τ)
- *   d₂ = (ln(S/H) + σ²τ/2) / (σ√τ)
+ * One-touch barrier ("hit") YES price with direction support (r=0).
+ *
+ * UP barrier (isUpBarrier=true, H > spot at entry):
+ *   Need price to RISE to H.
+ *   S ≥ H → barrier breached → 1
+ *   S < H → P = Φ(d₁) + (S/H)·Φ(d₂)
+ *     d₁ = (ln(S/H) − σ²τ/2) / (σ√τ)
+ *     d₂ = (ln(S/H) + σ²τ/2) / (σ√τ)
+ *
+ * DOWN barrier (isUpBarrier=false, H < spot at entry):
+ *   Need price to DROP to H.
+ *   S ≤ H → barrier breached → 1
+ *   S > H → P = Φ(e₁) + (S/H)·Φ(e₂)
+ *     e₁ = (ln(H/S) + σ²τ/2) / (σ√τ)
+ *     e₂ = (ln(H/S) − σ²τ/2) / (σ√τ)
  */
-export function priceHit(S: number, H: number, sigma: number, tau: number): number {
-  if (S >= H) return 1;
-  if (tau <= 0) return 0;
-  if (sigma <= 0) return 0;
+export function priceHit(S: number, H: number, sigma: number, tau: number, isUpBarrier: boolean): number {
+  if (S === H) return 1;
 
-  const sqrtTau = Math.sqrt(tau);
-  const logSH = Math.log(S / H); // negative since S < H
-  const halfSigmaSqTau = (sigma * sigma * tau) / 2;
+  if (isUpBarrier) {
+    // UP barrier: need price to rise to H
+    if (S >= H) return 1;
+    if (tau <= 0 || sigma <= 0) return 0;
 
-  const d1 = (logSH - halfSigmaSqTau) / (sigma * sqrtTau);
-  const d2 = (logSH + halfSigmaSqTau) / (sigma * sqrtTau);
+    const sqrtTau = Math.sqrt(tau);
+    const logSH = Math.log(S / H); // negative since S < H
+    const halfSigmaSqTau = (sigma * sigma * tau) / 2;
 
-  const price = normalCDF(d1) + (S / H) * normalCDF(d2);
-  return Math.min(1, Math.max(0, price));
+    const d1 = (logSH - halfSigmaSqTau) / (sigma * sqrtTau);
+    const d2 = (logSH + halfSigmaSqTau) / (sigma * sqrtTau);
+
+    return Math.min(1, Math.max(0, normalCDF(d1) + (S / H) * normalCDF(d2)));
+  } else {
+    // DOWN barrier: need price to drop to H
+    if (S <= H) return 1;
+    if (tau <= 0 || sigma <= 0) return 0;
+
+    const sqrtTau = Math.sqrt(tau);
+    const logHS = Math.log(H / S); // negative since H < S
+    const halfSigmaSqTau = (sigma * sigma * tau) / 2;
+
+    const e1 = (logHS + halfSigmaSqTau) / (sigma * sqrtTau);
+    const e2 = (logHS - halfSigmaSqTau) / (sigma * sqrtTau);
+
+    return Math.min(1, Math.max(0, normalCDF(e1) + (S / H) * normalCDF(e2)));
+  }
 }
 
 /**
- * Price the YES side of an option
+ * Price the YES side of an option.
+ * For 'hit' type, isUpBarrier determines barrier direction.
  */
 export function priceOptionYes(
-  S: number, K: number, sigma: number, tau: number, optionType: OptionType
+  S: number, K: number, sigma: number, tau: number, optionType: OptionType, isUpBarrier: boolean = true
 ): number {
-  return optionType === 'above' ? priceAbove(S, K, sigma, tau) : priceHit(S, K, sigma, tau);
+  return optionType === 'above' ? priceAbove(S, K, sigma, tau) : priceHit(S, K, sigma, tau, isUpBarrier);
 }
 
 /**
  * Implied volatility solver using Brent's method.
  * Always calibrates from the YES price (IV is the same for YES and NO).
+ * For hit-type, isUpBarrier determines barrier direction.
  */
 export function solveImpliedVol(
   S: number,
@@ -82,6 +108,7 @@ export function solveImpliedVol(
   tau: number,
   yesPrice: number,
   optionType: OptionType,
+  isUpBarrier: boolean = true,
   tolerance: number = 1e-6,
   maxIter: number = 100
 ): number | null {
@@ -92,7 +119,7 @@ export function solveImpliedVol(
   let a = 0.01;
   let b = 10.0;
 
-  const f = (sigma: number) => priceOptionYes(S, K, sigma, tau, optionType) - yesPrice;
+  const f = (sigma: number) => priceOptionYes(S, K, sigma, tau, optionType, isUpBarrier) - yesPrice;
 
   let fa = f(a);
   let fb = f(b);
@@ -187,7 +214,7 @@ export function computePnlCurve(
     let projectedValue = 0;
 
     for (const strike of strikes) {
-      const yesPrice = priceOptionYes(cryptoPrice, strike.strikePrice, strike.impliedVol, tau, optionType);
+      const yesPrice = priceOptionYes(cryptoPrice, strike.strikePrice, strike.impliedVol, tau, optionType, strike.isUpBarrier);
       projectedValue += strike.side === 'YES' ? yesPrice : (1 - yesPrice);
     }
 
@@ -199,11 +226,16 @@ export function computePnlCurve(
 
 /**
  * Compute P&L at expiry (tau → 0).
+ * For 'above': step function at strike (cryptoPrice >= strike → YES=1)
+ * For 'hit': step function depends on barrier direction:
+ *   UP barrier: cryptoPrice >= strike → hit → YES=1
+ *   DOWN barrier: cryptoPrice <= strike → hit → YES=1
  */
 export function computeExpiryPnl(
   strikes: SelectedStrike[],
   lowerPrice: number,
   upperPrice: number,
+  optionType: OptionType = 'above',
   numPoints: number = 200
 ): ProjectionPoint[] {
   if (strikes.length === 0 || numPoints < 2) return [];
@@ -217,7 +249,16 @@ export function computeExpiryPnl(
     let projectedValue = 0;
 
     for (const strike of strikes) {
-      const yesPayoff = cryptoPrice >= strike.strikePrice ? 1 : 0;
+      let yesPayoff: number;
+      if (optionType === 'hit') {
+        // Hit type: direction matters
+        yesPayoff = strike.isUpBarrier
+          ? (cryptoPrice >= strike.strikePrice ? 1 : 0)
+          : (cryptoPrice <= strike.strikePrice ? 1 : 0);
+      } else {
+        // Above type: standard step function
+        yesPayoff = cryptoPrice >= strike.strikePrice ? 1 : 0;
+      }
       projectedValue += strike.side === 'YES' ? yesPayoff : (1 - yesPayoff);
     }
 

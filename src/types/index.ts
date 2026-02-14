@@ -64,4 +64,5 @@ export interface SelectedStrike {
   side: Side;
   entryPrice: number; // Price paid (YES price for YES, 1-YES price for NO)
   impliedVol: number; // Calibrated IV (same for YES/NO)
+  isUpBarrier: boolean; // For hit-type: true if strike > spot (need price to rise)
 }
