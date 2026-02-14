@@ -143,9 +143,18 @@ export function ProjectionChart({
   );
 
   const tooltipLabelFormatter = useCallback(
-    (label: number) => `${cryptoSymbol}: $${label.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (label: number, payload: any[]) => {
+      const price = payload?.[0]?.payload?.cryptoPrice ?? label;
+      return `${cryptoSymbol}: $${price.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+    },
     [cryptoSymbol]
   );
+
+  const tooltipSorter = useCallback((item: { name?: string }) => {
+    const idx = curveLabels.indexOf(item.name || '');
+    return idx >= 0 ? idx : 999;
+  }, [curveLabels]);
 
   const handleLegendClick = useCallback((entry: { value?: string }) => {
     if (!entry.value) return;
@@ -210,6 +219,7 @@ export function ProjectionChart({
           contentStyle={TOOLTIP_STYLE}
           formatter={tooltipFormatter}
           labelFormatter={tooltipLabelFormatter}
+          itemSorter={tooltipSorter}
         />
         <Legend
           layout="horizontal"
