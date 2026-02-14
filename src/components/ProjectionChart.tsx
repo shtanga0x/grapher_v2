@@ -103,10 +103,9 @@ export function ProjectionChart({
   }, [curveLabels]);
 
   // Sort legend items to match our curveLabels order (Recharts sorts alphabetically otherwise)
-  const legendSorter = useCallback((a: { value?: string }, b: { value?: string }) => {
-    const idxA = curveLabels.indexOf(a.value || '');
-    const idxB = curveLabels.indexOf(b.value || '');
-    return idxA - idxB;
+  const legendSorter = useCallback((item: { value?: string }) => {
+    const idx = curveLabels.indexOf(item.value || '');
+    return idx >= 0 ? idx : 999;
   }, [curveLabels]);
 
   if (chartData.length === 0) return null;
