@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useTheme } from '@mui/material/styles';
 import {
   Box,
   Typography,
@@ -68,6 +69,9 @@ export function SecondScreen({
   optionType,
   onBack,
 }: SecondScreenProps) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === 'dark';
+
   const [selections, setSelections] = useState<Set<string>>(new Set());
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [loadingSpot, setLoadingSpot] = useState(true);
@@ -237,10 +241,14 @@ export function SecondScreen({
             variant="h4"
             sx={{
               fontWeight: 700,
-              background: 'linear-gradient(90deg, #E8EDF5 0%, #00D1FF 100%)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
+              ...(isDark
+                ? {
+                    background: 'linear-gradient(90deg, #E8EDF5 0%, #00D1FF 100%)',
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                  }
+                : { color: 'text.primary' }),
             }}
           >
             {event.title}
@@ -508,7 +516,7 @@ export function SecondScreen({
             >
               {/* Strike info */}
               <Box>
-                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                <Typography variant="body1" sx={{ fontWeight: 500, fontSize: '1.125rem' }}>
                   {market.groupItemTitle || market.question}
                 </Typography>
                 {ivInfo && (
@@ -538,6 +546,7 @@ export function SecondScreen({
                   sx={{
                     color: yesSelected ? '#22C55E' : 'text.secondary',
                     fontWeight: yesSelected ? 600 : 400,
+                    fontSize: '1rem',
                     minWidth: 45,
                     textAlign: 'right',
                   }}
@@ -566,6 +575,7 @@ export function SecondScreen({
                   sx={{
                     color: noSelected ? '#EF4444' : 'text.secondary',
                     fontWeight: noSelected ? 600 : 400,
+                    fontSize: '1rem',
                     minWidth: 45,
                     textAlign: 'right',
                   }}
