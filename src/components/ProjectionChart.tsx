@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
+import { useTheme } from '@mui/material/styles';
 import {
   LineChart,
   Line,
@@ -29,14 +30,6 @@ interface ChartDataRow {
 }
 
 const CHART_MARGIN = { top: 20, right: 60, bottom: 50, left: 20 };
-const GRID_STYLE = { strokeDasharray: '3 3', stroke: 'rgba(139, 157, 195, 0.1)' };
-const TOOLTIP_STYLE: React.CSSProperties = {
-  backgroundColor: 'rgba(19, 26, 42, 0.95)',
-  border: '1px solid rgba(139, 157, 195, 0.3)',
-  borderRadius: 8,
-  padding: '10px 14px',
-};
-const REFERENCE_LINE_STYLE = { stroke: 'rgba(139, 157, 195, 0.5)', strokeDasharray: '5 5' };
 const ACTIVE_DOT = { r: 4 };
 
 // Line styles per curve index: [Now, 1/3, 2/3, Expiry]
@@ -63,16 +56,18 @@ function CustomXTick(props: {
   payload: { value: number };
   majorInterval: number;
   minorInterval: number;
+  tickColor: string;
+  tickColorFaded: string;
 }) {
-  const { x, y, payload, majorInterval } = props;
+  const { x, y, payload, majorInterval, tickColor, tickColorFaded } = props;
   const value = payload.value;
   const isMajor = value % majorInterval === 0;
 
   if (isMajor) {
     return (
       <g transform={`translate(${x},${y})`}>
-        <line y1={0} y2={8} stroke="#8B9DC3" strokeWidth={1} />
-        <text y={22} textAnchor="middle" fill="#8B9DC3" fontSize={12} fontFamily="JetBrains Mono, monospace">
+        <line y1={0} y2={8} stroke={tickColor} strokeWidth={1} />
+        <text y={22} textAnchor="middle" fill={tickColor} fontSize={12} fontFamily="JetBrains Mono, monospace">
           ${value.toLocaleString()}
         </text>
       </g>
@@ -81,7 +76,7 @@ function CustomXTick(props: {
 
   return (
     <g transform={`translate(${x},${y})`}>
-      <line y1={0} y2={4} stroke="rgba(139, 157, 195, 0.3)" strokeWidth={1} />
+      <line y1={0} y2={4} stroke={tickColorFaded} strokeWidth={1} />
     </g>
   );
 }
@@ -94,6 +89,9 @@ function CustomTooltipContent({
   hiddenCurves,
   currentCryptoPrice,
   totalEntryCost,
+  tooltipBg,
+  tooltipBorder,
+  secondaryColor,
 }: {
   active?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,6 +102,9 @@ function CustomTooltipContent({
   hiddenCurves: Set<number>;
   currentCryptoPrice: number;
   totalEntryCost: number;
+  tooltipBg: string;
+  tooltipBorder: string;
+  secondaryColor: string;
 }) {
   if (!active || !payload || payload.length === 0) return null;
 
@@ -123,8 +124,13 @@ function CustomTooltipContent({
   }
 
   return (
-    <div style={TOOLTIP_STYLE}>
-      <div style={{ color: '#8B9DC3', marginBottom: 6, fontSize: 14 }}>
+    <div style={{
+      backgroundColor: tooltipBg,
+      border: `1px solid ${tooltipBorder}`,
+      borderRadius: 8,
+      padding: '10px 14px',
+    }}>
+      <div style={{ color: secondaryColor, marginBottom: 6, fontSize: 14 }}>
         {cryptoSymbol}: ${cryptoPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })} ({formatPct(pricePct)})
       </div>
       {curveLabels.map((label, i) => {
@@ -152,6 +158,17 @@ export function ProjectionChart({
   cryptoSymbol,
   totalEntryCost,
 }: ProjectionChartProps) {
+  const muiTheme = useTheme();
+  const isDark = muiTheme.palette.mode === 'dark';
+  const axisColor = isDark ? '#8B9DC3' : '#5A6A85';
+  const gridColor = isDark ? 'rgba(139, 157, 195, 0.1)' : 'rgba(0, 0, 0, 0.08)';
+  const refLineColor = isDark ? 'rgba(139, 157, 195, 0.5)' : 'rgba(0, 0, 0, 0.2)';
+  const zeroLineColor = isDark ? 'rgba(139, 157, 195, 0.6)' : 'rgba(0, 0, 0, 0.25)';
+  const tickColorFaded = isDark ? 'rgba(139, 157, 195, 0.3)' : 'rgba(0, 0, 0, 0.15)';
+  const tooltipBg = isDark ? 'rgba(19, 26, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+  const tooltipBorder = isDark ? 'rgba(139, 157, 195, 0.3)' : 'rgba(0, 0, 0, 0.12)';
+  const legendColor = isDark ? '#8B9DC3' : '#5A6A85';
+
   const [hiddenCurves, setHiddenCurves] = useState<Set<number>>(new Set());
 
   const chartData = useMemo(() => {
@@ -258,9 +275,9 @@ export function ProjectionChart({
   const renderTick = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (props: any) => (
-      <CustomXTick {...props} majorInterval={majorInterval} minorInterval={minorInterval} />
+      <CustomXTick {...props} majorInterval={majorInterval} minorInterval={minorInterval} tickColor={axisColor} tickColorFaded={tickColorFaded} />
     ),
-    [majorInterval, minorInterval]
+    [majorInterval, minorInterval, axisColor, tickColorFaded]
   );
 
   const renderTooltip = useCallback(
@@ -273,9 +290,12 @@ export function ProjectionChart({
         hiddenCurves={hiddenCurves}
         currentCryptoPrice={currentCryptoPrice}
         totalEntryCost={totalEntryCost}
+        tooltipBg={tooltipBg}
+        tooltipBorder={tooltipBorder}
+        secondaryColor={axisColor}
       />
     ),
-    [curveLabels, cryptoSymbol, hiddenCurves, currentCryptoPrice, totalEntryCost]
+    [curveLabels, cryptoSymbol, hiddenCurves, currentCryptoPrice, totalEntryCost, tooltipBg, tooltipBorder, axisColor]
   );
 
   if (chartData.length === 0) return null;
@@ -284,14 +304,14 @@ export function ProjectionChart({
     <div>
       <ResponsiveContainer width="100%" minHeight={600}>
         <LineChart data={chartData} margin={CHART_MARGIN}>
-          <CartesianGrid {...GRID_STYLE} />
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
           <XAxis
             dataKey="cryptoPrice"
             type="number"
             domain={xDomain}
             ticks={allTicks}
             tick={renderTick}
-            stroke="#8B9DC3"
+            stroke={axisColor}
             tickLine={false}
             interval={0}
           />
@@ -301,13 +321,13 @@ export function ProjectionChart({
             domain={yDomain}
             ticks={yTicks}
             tickFormatter={formatYAxisCost}
-            stroke="#8B9DC3"
+            stroke={axisColor}
             fontSize={13}
             label={{
               value: 'Cost',
               angle: -90,
               position: 'insideLeft',
-              style: { fill: '#8B9DC3', fontSize: 14 },
+              style: { fill: axisColor, fontSize: 14 },
             }}
           />
           <YAxis
@@ -316,45 +336,46 @@ export function ProjectionChart({
             domain={yDomain}
             ticks={yTicks}
             tickFormatter={formatYAxisPnl}
-            stroke="#8B9DC3"
+            stroke={axisColor}
             fontSize={13}
             label={{
               value: 'P&L',
               angle: 90,
               position: 'insideRight',
-              style: { fill: '#8B9DC3', fontSize: 14 },
+              style: { fill: axisColor, fontSize: 14 },
             }}
           />
           <Tooltip content={renderTooltip} />
           <ReferenceLine
             yAxisId="left"
             y={0}
-            stroke="rgba(139, 157, 195, 0.6)"
+            stroke={zeroLineColor}
             strokeDasharray="3 3"
           />
           <ReferenceLine
             yAxisId="left"
             x={currentCryptoPrice}
-            {...REFERENCE_LINE_STYLE}
+            stroke={refLineColor}
+            strokeDasharray="5 5"
             label={{
               value: `Spot: $${currentCryptoPrice.toLocaleString()}`,
               position: 'top',
-              fill: '#8B9DC3',
+              fill: axisColor,
               fontSize: 13,
             }}
           />
 
-          {/* Hidden line to bind data to right YAxis — Recharts needs this to compute its scale */}
+          {/* Invisible line bound to right YAxis — Recharts needs a data series to compute scale */}
           <Line
             yAxisId="right"
             type="monotone"
             dataKey={curveLabels[0]}
             stroke="none"
+            strokeWidth={0}
             dot={false}
             activeDot={false}
             legendType="none"
             tooltipType="none"
-            hide
           />
 
           {/* Now line: yellowish-orange, dashed */}
@@ -431,7 +452,7 @@ export function ProjectionChart({
                 <div style={{ flex: 1, backgroundColor: RED, borderRadius: '0 2px 2px 0' }} />
               </div>
             )}
-            <span style={{ color: '#8B9DC3', fontSize: 14 }}>{label}</span>
+            <span style={{ color: legendColor, fontSize: 14 }}>{label}</span>
           </div>
         ))}
       </div>

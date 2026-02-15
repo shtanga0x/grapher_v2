@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
-import { ThemeProvider, CssBaseline, Box } from '@mui/material';
-import { theme } from './theme';
+import { ThemeProvider, CssBaseline, Box, IconButton } from '@mui/material';
+import { DarkMode, LightMode } from '@mui/icons-material';
+import { darkTheme, lightTheme } from './theme';
 import { FirstScreen } from './components/FirstScreen';
 import { SecondScreen } from './components/SecondScreen';
 import type { CryptoOption, OptionType, ParsedMarket, PolymarketEvent } from './types';
@@ -16,6 +17,7 @@ interface AppState {
 
 function App() {
   const [screen, setScreen] = useState<Screen>('first');
+  const [isDark, setIsDark] = useState(true);
   const [appState, setAppState] = useState<AppState>({
     event: null,
     markets: [],
@@ -37,14 +39,33 @@ function App() {
   }, []);
 
   return (
-    <ThemeProvider theme={theme}>
+    <ThemeProvider theme={isDark ? darkTheme : lightTheme}>
       <CssBaseline />
       <Box
         sx={{
           minHeight: '100vh',
           bgcolor: 'background.default',
+          position: 'relative',
         }}
       >
+        {/* Theme toggle — top right */}
+        <IconButton
+          onClick={() => setIsDark((v) => !v)}
+          sx={{
+            position: 'fixed',
+            top: 16,
+            right: 16,
+            zIndex: 1300,
+            bgcolor: isDark ? 'rgba(139, 157, 195, 0.1)' : 'rgba(0, 0, 0, 0.06)',
+            '&:hover': {
+              bgcolor: isDark ? 'rgba(139, 157, 195, 0.2)' : 'rgba(0, 0, 0, 0.12)',
+            },
+            color: isDark ? '#FFB020' : '#5A6A85',
+          }}
+        >
+          {isDark ? <LightMode /> : <DarkMode />}
+        </IconButton>
+
         {screen === 'first' && (
           <FirstScreen onNavigateToChart={handleNavigateToChart} />
         )}
