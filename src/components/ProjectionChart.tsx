@@ -344,6 +344,19 @@ export function ProjectionChart({
             }}
           />
 
+          {/* Hidden line to bind data to right YAxis — Recharts needs this to compute its scale */}
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey={curveLabels[0]}
+            stroke="none"
+            dot={false}
+            activeDot={false}
+            legendType="none"
+            tooltipType="none"
+            hide
+          />
+
           {/* Now line: yellowish-orange, dashed */}
           <Line
             yAxisId="left"
