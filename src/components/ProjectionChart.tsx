@@ -12,9 +12,11 @@ import {
 } from 'recharts';
 import type { ProjectionPoint } from '../types';
 
-const NOW_COLOR = '#FFB020';
 const GREEN = '#22C55E';
 const RED = '#EF4444';
+
+// Dash patterns per curve: [Now=solid, 1/3=short, 2/3=medium, Expiry=long]
+const DASH_ARRAYS = ['', '4 3', '8 5', '14 6'];
 
 interface ProjectionChartProps {
   curves: ProjectionPoint[][]; // 4 curves: now, 1/3, 2/3, expiry
@@ -140,7 +142,7 @@ function CustomTooltipContent({
         const cost = pnl + totalEntryCost;
         const pnlPct = totalEntryCost > 0 ? (pnl / totalEntryCost) * 100 : 0;
         const pnlSign = pnl >= 0 ? '+' : '';
-        const color = i === 0 ? NOW_COLOR : (pnl >= 0 ? GREEN : RED);
+        const color = pnl >= 0 ? GREEN : RED;
         return (
           <div key={label} style={{ color, fontSize: 13, padding: '2px 0' }}>
             {label}: {cost.toFixed(2)} / {pnlSign}{pnl.toFixed(2)} ({formatPct(pnlPct)})
@@ -180,14 +182,10 @@ export function ProjectionChart({
       for (let c = 0; c < curves.length; c++) {
         if (curves[c][i]) {
           const pnl = curves[c][i].pnl;
-          if (c === 0) {
-            row[curveLabels[c]] = pnl;
+          if (pnl >= 0) {
+            row[`${curveLabels[c]}__pos`] = pnl;
           } else {
-            if (pnl >= 0) {
-              row[`${curveLabels[c]}__pos`] = pnl;
-            } else {
-              row[`${curveLabels[c]}__neg`] = pnl;
-            }
+            row[`${curveLabels[c]}__neg`] = pnl;
           }
         }
       }
@@ -196,7 +194,7 @@ export function ProjectionChart({
 
     // Second pass: bridge sign changes with green so lines stay connected
     for (let i = 0; i < data.length - 1; i++) {
-      for (let c = 1; c < curves.length; c++) {
+      for (let c = 0; c < curves.length; c++) {
         const posKey = `${curveLabels[c]}__pos`;
         const negKey = `${curveLabels[c]}__neg`;
         const hasPosNow = posKey in data[i];
@@ -369,7 +367,7 @@ export function ProjectionChart({
           <Line
             yAxisId="right"
             type="monotone"
-            dataKey={curveLabels[0]}
+            dataKey={`${curveLabels[0]}__pos`}
             stroke="none"
             strokeWidth={0}
             dot={false}
@@ -378,24 +376,8 @@ export function ProjectionChart({
             tooltipType="none"
           />
 
-          {/* Now line: yellowish-orange, dashed */}
-          <Line
-            yAxisId="left"
-            type="monotone"
-            dataKey={curveLabels[0]}
-            name={curveLabels[0]}
-            stroke={NOW_COLOR}
-            strokeWidth={LINE_WIDTHS[0]}
-            strokeDasharray="6 3"
-            dot={false}
-            activeDot={ACTIVE_DOT}
-            connectNulls
-            hide={hiddenCurves.has(0)}
-            strokeOpacity={hiddenCurves.has(0) ? 0.15 : LINE_OPACITIES[0]}
-          />
-
-          {/* 1/3, 2/3, Expiry: split into green (>=0) and red (<0) lines */}
-          {[1, 2, 3].map((i) => [
+          {/* All curves: split into green (>=0) and red (<0) lines */}
+          {[0, 1, 2, 3].map((i) => [
             <Line
               key={`${curveLabels[i]}__pos`}
               yAxisId="left"
@@ -404,6 +386,7 @@ export function ProjectionChart({
               name={`${curveLabels[i]}__pos`}
               stroke={GREEN}
               strokeWidth={LINE_WIDTHS[i]}
+              strokeDasharray={DASH_ARRAYS[i] || undefined}
               dot={false}
               activeDot={ACTIVE_DOT}
               connectNulls={false}
@@ -419,6 +402,7 @@ export function ProjectionChart({
               name={`${curveLabels[i]}__neg`}
               stroke={RED}
               strokeWidth={LINE_WIDTHS[i]}
+              strokeDasharray={DASH_ARRAYS[i] || undefined}
               dot={false}
               activeDot={ACTIVE_DOT}
               connectNulls={false}
@@ -444,14 +428,14 @@ export function ProjectionChart({
               opacity: hiddenCurves.has(i) ? 0.3 : 1,
             }}
           >
-            {i === 0 ? (
-              <div style={{ width: 16, height: 0, borderTop: `2px dashed ${NOW_COLOR}` }} />
-            ) : (
-              <div style={{ display: 'flex', width: 16, height: LINE_WIDTHS[i] }}>
-                <div style={{ flex: 1, backgroundColor: GREEN, borderRadius: '2px 0 0 2px' }} />
-                <div style={{ flex: 1, backgroundColor: RED, borderRadius: '0 2px 2px 0' }} />
-              </div>
-            )}
+            <svg width={24} height={LINE_WIDTHS[i] + 2} style={{ display: 'block' }}>
+              <line x1={0} y1={(LINE_WIDTHS[i] + 2) / 2} x2={12} y2={(LINE_WIDTHS[i] + 2) / 2}
+                stroke={GREEN} strokeWidth={LINE_WIDTHS[i]}
+                strokeDasharray={DASH_ARRAYS[i] || undefined} />
+              <line x1={12} y1={(LINE_WIDTHS[i] + 2) / 2} x2={24} y2={(LINE_WIDTHS[i] + 2) / 2}
+                stroke={RED} strokeWidth={LINE_WIDTHS[i]}
+                strokeDasharray={DASH_ARRAYS[i] || undefined} />
+            </svg>
             <span style={{ color: legendColor, fontSize: 14 }}>{label}</span>
           </div>
         ))}
