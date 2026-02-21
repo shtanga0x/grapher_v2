@@ -14,7 +14,7 @@ import {
 import { ArrowBack } from '@mui/icons-material';
 import type { CryptoOption, OptionType, ParsedMarket, PolymarketEvent, SelectedStrike, ProjectionPoint, Side } from '../types';
 import { fetchCurrentPrice } from '../api/binance';
-import { solveImpliedVol, computePnlCurve, computeExpiryPnl, type SmilePoint } from '../pricing/engine';
+import { solveImpliedVol, computePnlCurve, computeExpiryPnl, autoH, type SmilePoint } from '../pricing/engine';
 import { ProjectionChart } from './ProjectionChart';
 
 interface SecondScreenProps {
@@ -78,7 +78,7 @@ export function SecondScreen({
   const [error, setError] = useState<string | null>(null);
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0]);
   const [sliderBounds, setSliderBounds] = useState<[number, number]>([0, 0]);
-  const [hExponent, setHExponent] = useState(0.5);
+  const [hDelta, setHDelta] = useState(0.00);  // offset to auto-computed H tiers
 
   const expirationTs = event.endDate;
   const nowTs = Math.floor(Date.now() / 1000);
@@ -125,7 +125,7 @@ export function SecondScreen({
   }, []);
 
   const handleHChange = useCallback((_: unknown, value: number | number[]) => {
-    setHExponent(value as number);
+    setHDelta(value as number);
   }, []);
 
   // Calibrate IV and build selected strikes
@@ -139,7 +139,8 @@ export function SecondScreen({
       if (!market || market.strikePrice <= 0) continue;
 
       const isUpBarrier = market.strikePrice > spotPrice;
-      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hExponent);
+      const hNow = autoH(tauNow, hDelta);
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hNow);
       const side: Side = sideStr;
       const entryPrice = side === 'YES' ? market.currentPrice : (1 - market.currentPrice);
 
@@ -155,23 +156,23 @@ export function SecondScreen({
       });
     }
     return result;
-  }, [markets, selections, spotPrice, tauNow, optionType, hExponent]);
+  }, [markets, selections, spotPrice, tauNow, optionType, hDelta]);
 
-  // Build IV smile from ALL market strikes (not just selected)
+  // Build IV smile from ALL market strikes (not just selected) — calibrate with H at current τ
   const ivSmile: SmilePoint[] = useMemo(() => {
     if (!spotPrice || tauNow <= 0) return [];
-
+    const hNow = autoH(tauNow, hDelta);
     const points: SmilePoint[] = [];
     for (const market of markets) {
       if (market.strikePrice <= 0 || market.currentPrice <= 0.001 || market.currentPrice >= 0.999) continue;
       const isUpBarrier = market.strikePrice > spotPrice;
-      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hExponent);
+      const iv = solveImpliedVol(spotPrice, market.strikePrice, tauNow, market.currentPrice, optionType, isUpBarrier, hNow);
       if (iv !== null) {
         points.push({ moneyness: Math.log(spotPrice / market.strikePrice), iv });
       }
     }
     return points.sort((a, b) => a.moneyness - b.moneyness);
-  }, [markets, spotPrice, tauNow, optionType, hExponent]);
+  }, [markets, spotPrice, tauNow, optionType, hDelta]);
 
   // Curve labels with hours
   const curveLabels = useMemo(() => {
@@ -186,7 +187,7 @@ export function SecondScreen({
     ];
   }, [timeToExpirySec]);
 
-  // Compute 4 P&L curves
+  // Compute 4 P&L curves — each snapshot uses H auto-assigned by its own τ
   const projectionCurves: ProjectionPoint[][] = useMemo(() => {
     const [lower, upper] = priceRange;
     if (selectedStrikes.length === 0 || lower <= 0 || upper <= lower) return [];
@@ -196,12 +197,12 @@ export function SecondScreen({
     const tau3 = tauNow * (1 / 3);
 
     return [
-      computePnlCurve(selectedStrikes, lower, upper, tau1, optionType, hExponent, ivSmile),
-      computePnlCurve(selectedStrikes, lower, upper, tau2, optionType, hExponent, ivSmile),
-      computePnlCurve(selectedStrikes, lower, upper, tau3, optionType, hExponent, ivSmile),
+      computePnlCurve(selectedStrikes, lower, upper, tau1, optionType, autoH(tau1, hDelta), ivSmile),
+      computePnlCurve(selectedStrikes, lower, upper, tau2, optionType, autoH(tau2, hDelta), ivSmile),
+      computePnlCurve(selectedStrikes, lower, upper, tau3, optionType, autoH(tau3, hDelta), ivSmile),
       computeExpiryPnl(selectedStrikes, lower, upper, optionType),
     ];
-  }, [selectedStrikes, priceRange, tauNow, optionType, hExponent, ivSmile]);
+  }, [selectedStrikes, priceRange, tauNow, optionType, hDelta, ivSmile]);
 
   const expiryDate = new Date(expirationTs * 1000);
   const hasSelections = selections.size > 0;
@@ -414,7 +415,7 @@ export function SecondScreen({
 
       </Paper>
 
-      {/* Time Exponent (H) Slider */}
+      {/* Time Exponent (H) Slider — ΔH offset applied to auto-computed tiers */}
       {!loadingSpot && (
         <Paper
           elevation={0}
@@ -423,25 +424,32 @@ export function SecondScreen({
             border: '1px solid rgba(139, 157, 195, 0.15)',
           }}
         >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              0.40
+              −0.20
             </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-              Time Exponent H = {hExponent.toFixed(2)}
-            </Typography>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                H offset: {hDelta >= 0 ? '+' : ''}{hDelta.toFixed(2)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {'>'}{'>'}7d: H={autoH(10 / 365.25, hDelta).toFixed(2)} &nbsp;|&nbsp;
+                3–7d: H={autoH(5 / 365.25, hDelta).toFixed(2)} &nbsp;|&nbsp;
+                {'<'}3d: H={autoH(1 / 365.25, hDelta).toFixed(2)}
+              </Typography>
+            </Box>
             <Typography variant="body2" color="text.secondary">
-              0.80
+              +0.20
             </Typography>
           </Box>
           <Slider
-            value={hExponent}
+            value={hDelta}
             onChange={handleHChange}
-            min={0.4}
-            max={0.8}
+            min={-0.20}
+            max={0.20}
             step={0.01}
             valueLabelDisplay="auto"
-            valueLabelFormat={(v) => v.toFixed(2)}
+            valueLabelFormat={(v) => (v >= 0 ? '+' : '') + v.toFixed(2)}
             sx={{
               color: '#A78BFA',
               '& .MuiSlider-thumb': {

@@ -44,7 +44,15 @@ Two adjustments improve accuracy over the standard Black-Scholes model for crypt
 
 #### Time-Scaling Exponent H
 
-Standard Black-Scholes uses √τ for time scaling (H = 0.5), assuming Brownian motion. Crypto markets exhibit faster mean-reversion for near-ATM moves. Replacing τ^0.5 with τ^H where H > 0.5 makes convergence faster for ATM strikes while preserving OTM behavior. Controlled via the purple slider (range 0.40–0.80, default 0.50). See [`docs/PRICING.md`](docs/PRICING.md) for the modified equations.
+Standard Black-Scholes uses √τ for time scaling (H = 0.5), assuming Brownian motion. Crypto markets exhibit faster convergence near-ATM, especially approaching expiry. H is **auto-assigned per snapshot** based on time-to-expiry:
+
+| τ at snapshot | H used | Rationale |
+|---------------|--------|-----------|
+| > 7 days | 0.50 | Standard BS — early in event |
+| 3 – 7 days | 0.60 | Mid-week convergence |
+| ≤ 3 days | 0.65 | Near-expiry rapid convergence |
+
+The purple ΔH slider (range −0.20 to +0.20, default 0.00) shifts all three tiers by the same offset. The effective H for each tier is shown live in the slider label. See [`docs/PRICING.md`](docs/PRICING.md) for the modified equations and empirical calibration results.
 
 #### IV Smile (Sticky-Moneyness Dynamics)
 

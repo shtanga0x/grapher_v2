@@ -164,34 +164,53 @@ Generalized: σ·τ^H              and    σ²·τ^(2H)
 
 **Effects of H:**
 
-| H value | Behavior |
-|---------|----------|
-| H = 0.50 | Standard Black-Scholes (Brownian motion) |
-| H > 0.50 | Faster time decay → faster ATM convergence |
-| H < 0.50 | Slower time decay → slower convergence |
-| H ≈ 0.55–0.65 | Empirically best fit for crypto markets |
+For short-dated options (τ < 1 year, e.g. τ = 0.019 for a 7-day event):
 
-**Why it works:** Increasing H makes τ^H < τ^0.5 (since τ < 1 for sub-annual options), which effectively reduces the "time value" faster. This causes:
-- ATM options to converge to their intrinsic value more quickly
-- OTM options to remain relatively unaffected (they're dominated by the moneyness term ln(S/K), not the time term)
+| H    | τ^H at τ = 7d | σ·τ^H (uncertainty term) | Behavior |
+|------|--------------|--------------------------|----------|
+| 0.50 | 0.138        | —                        | Standard BS (Brownian motion) |
+| 0.60 | 0.099        | smaller                  | Faster convergence |
+| 0.65 | 0.071        | much smaller             | Near-expiry rapid convergence |
+
+**Why it works:** Increasing H makes τ^H < τ^0.5 (since τ < 1), reducing the "time value" faster:
+- ATM options converge to intrinsic value more quickly
+- OTM options remain relatively unaffected (dominated by the moneyness term ln(S/K))
+
+### Auto-H Tier Assignment (Empirically Calibrated)
+
+H is not a single global parameter — it is **auto-assigned per time snapshot** based on τ at that snapshot:
+
+| τ at snapshot | Base H | Rationale |
+|---------------|--------|-----------|
+| > 7 days | 0.50 | Standard BS — early in event lifetime |
+| 3 – 7 days | 0.60 | Mid-week convergence accelerates |
+| ≤ 3 days | 0.65 | Near-expiry rapid convergence |
+
+This was determined by empirical out-of-sample RMSE analysis across 17 Polymarket BTC events (12 daily ABOVE events Feb 13–24 2026, 2 monthly HIT events, 3 weekly 7-day HIT events Feb 2–22 2026). The calibration:
+- Calibrated IV on the early half of each event's price history
+- Predicted the late half and measured RMSE
+- Found median optimal H of 0.60 for early week (τ > 3.5d) and 0.65 for late week (τ ≤ 3.5d)
+
+The IV smile is always calibrated with the H appropriate for the current (Now) τ.
 
 ### Connection to Fractional Brownian Motion
 
-The exponent H is analogous to the **Hurst exponent** in fractional Brownian motion (fBM):
+H is analogous to the **Hurst exponent** in fractional Brownian motion (fBM):
 - H = 0.5: Standard Brownian motion (independent increments)
 - H > 0.5: Persistent/trending behavior (positive autocorrelation)
-- H < 0.5: Mean-reverting behavior (negative autocorrelation)
 
-However, our implementation is a pragmatic approximation — we only replace the time scaling, not the full fBM framework. This keeps the model simple while capturing the primary effect.
+Our implementation is a pragmatic approximation — only the time scaling is modified, not the full fBM framework. There is no empirical evidence that high-volatility BTC periods require a higher H; the two are independent parameters.
 
 ### UI Control
 
-The H parameter is controlled via a purple slider in the UI:
-- Range: 0.40 to 0.80
+H is controlled via a **ΔH offset slider** in the UI:
+- Range: −0.20 to +0.20
 - Step: 0.01
-- Default: 0.50
+- Default: 0.00 (tiers: >7d→0.50, 3–7d→0.60, ≤3d→0.65)
+- The slider shifts all three auto-computed tiers by the same delta
+- Effective H for each tier is shown live in the slider label
 
-Changing H recalibrates all IVs (since IV depends on H) and recomputes all projection curves.
+Changing ΔH recalibrates all IVs (since IV depends on H) and recomputes all projection curves.
 
 ---
 

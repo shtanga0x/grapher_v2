@@ -1,7 +1,7 @@
 {
   "name": "polymarket-grapher-v2",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Polymarket options projection tool — visualize construction costs across crypto price ranges",
   "type": "module",
   "scripts": {
